@@ -272,9 +272,13 @@ authority over only that question, and carries a jurisdiction gate — the
 principle of least authority, applied to relevance:
 
 ```
-resolution   rᵢ = max( ⟨q,kᵢ⟩ , ⟨q,vᵢ⟩ )      is it about this?
-             — dense cosine against address AND content ("the answer's own
-               embedding is a key"); authority: paraphrase & meaning
+resolution   rᵢ = max( ⟨q,kᵢ⟩ , ⟨q,vᵢ⟩ , maxⱼ⟨q,aᵢⱼ⟩ )   is it about this?
+             — dense cosine against address, content ("the answer's own
+               embedding is a key"), and the entry's optional question
+               aliases aᵢⱼ, which fold into their parent. max, not sum:
+               these are alternative DOORS to one belief, not independent
+               evidence — one open door suffices, and adding an address can
+               never hurt its own entry. Authority: paraphrase & meaning
 
 lexical      BM25(q, entryᵢ) · g               does it contain the rare term?
              g = clip((maxIDF(q) − 3)/3, 0, 1) — the gate: this view votes
@@ -285,7 +289,8 @@ lexical      BM25(q, entryᵢ) · g               does it contain the rare term?
 fusion       RRF over ONE candidate pool       reciprocal-rank fusion of the
              two views — errors of dense (blurs jargon) and lexical (blind
              to paraphrase) are near-disjoint, so agreement multiplies
-             evidence
+             evidence. A zero lexical score contributes NO rank credit
+             (absence of evidence is not a rank)
 
 currency     cᵢ = ⟨S·kᵢ, vᵢ⟩ / max over the    does the belief still stand?
              entry's address-cluster (≥0.9)    — reads the write-time
