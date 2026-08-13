@@ -8,3 +8,4 @@ dist/
 *.f16
 state.npz
 benchmarks/probes_local*.py
+uv.lock
