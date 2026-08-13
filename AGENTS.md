@@ -148,6 +148,11 @@ Resolution order: `--store PATH` flag > `MNEMA_STORE` env var > `~/.mnema`.
 Keep separate stores per scope (personal, project, team). Create one with
 `mnema --store <path> init`.
 
+`mnema topics [--from <vault>]` lists a store's current topic slots — names
+only, sorted so prefix categories read as a tree, each with its latest hash
+pronoun for `mnema show`. Model-free and instant; the map of a memory
+before you ask it anything.
+
 ## Vaults: other people's memories
 
 `mnema vault list` shows every memory you can read: your local store plus

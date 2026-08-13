@@ -267,6 +267,40 @@ def cmd_log(args) -> None:
                             subsequent_indent="          "))
 
 
+def cmd_topics(args) -> None:
+    from . import vaults as V
+    store = Store(Path(args.store))
+    source = "local"
+    if args.from_vault:
+        match = [v for v in V.load_vaults(store.path) if v["name"] == args.from_vault]
+        if not match:
+            raise SystemExit(f"no vault named '{args.from_vault}' (see: mnema vault list)")
+        store = Store(V.sync_vault(store.path, match[0]))
+        source = args.from_vault
+
+    entries = store.entries()
+    retracted = store.retracted_hashes(entries)
+    live = [e for e in entries
+            if e.kind not in ("keep", "retract", "alias") and e.h not in retracted]
+    by_topic: dict[str, list[Entry]] = {}
+    anonymous = 0
+    for e in live:
+        if e.topic:
+            by_topic.setdefault(e.topic, []).append(e)
+        else:
+            anonymous += 1
+
+    topical = sum(len(v) for v in by_topic.values())
+    print(f"{source}: {len(by_topic)} topics "
+          f"({topical} topical writes, {anonymous} anonymous)")
+    width = max((len(t) for t in by_topic), default=0)
+    for topic in sorted(by_topic):
+        writes = by_topic[topic]
+        latest = writes[-1]
+        tag = f"  ({len(writes)} writes)" if len(writes) > 1 else ""
+        print(f"  {topic:<{width}}  {latest.at[:10]}  {latest.h[:8]}{tag}")
+
+
 def cmd_forget(args) -> None:
     store = Store(Path(args.store))
     targets = list(args.hashes)
@@ -426,6 +460,12 @@ def main() -> None:
     p.add_argument("--all", action="store_true", help="no limit")
     p.add_argument("--full", action="store_true", help="full text, no truncation")
     p.set_defaults(fn=cmd_log)
+
+    p = sub.add_parser("topics", help="list topics sorted, no content — prefixes "
+                       "read as a tree (local or a vault); model-free")
+    p.add_argument("--from", dest="from_vault", metavar="VAULT",
+                   help="list a named vault instead of the local store")
+    p.set_defaults(fn=cmd_topics)
 
     p = sub.add_parser("vault", help="named read-only memories that join your queries")
     p.add_argument("action", choices=["add", "list", "remove"])

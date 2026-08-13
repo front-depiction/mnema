@@ -144,6 +144,11 @@ $ mnema vault list
 local            ~/.mnema                                    412 memories
 alice            https://alice-mbp.tail1234.ts.net/mnema     876 memories
 
+$ mnema topics --from alice                         # just the topic slots, no content
+alice: 214 topics (876 topical writes, 12 anonymous)
+  ops/deploy-freeze    2026-08-13  6fe00a06  (2 writes)
+  ops/retro            2026-08-01  90635959
+
 $ mnema ask "did anyone rule on retry semantics?"   # local + every vault
 <hit h="8397fcd1" at="2026-08-11" kind="note" vault="alice">
   retries are per-event with capped backoff, ruled at ...
