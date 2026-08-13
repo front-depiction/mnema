@@ -33,6 +33,12 @@ from .views import Views, postings_of
 SUPPORT_SETTLED = 0.65
 SUPPORT_UNWRITTEN = 0.55
 
+# Relate hop: the top hit's stored value vector probes every OTHER consulted
+# pool. Claim-to-claim cosines run hot (0.65–0.80 is ordinary), so these are
+# relatedness weights — never support-verdict material.
+RELATE_FLOOR = 0.68
+RELATE_TOP = 2                       # rows surfaced per non-origin pool
+
 VAULT_MATCH_KEYS = ("model", "dim", "seed", "sigma", "d_embed", "beta")
 
 
@@ -51,10 +57,22 @@ class Hit:
 
 
 @dataclass
+class Related:
+    source: str
+    topic: str | None
+    at: str
+    kind: str
+    h: str
+    cos: float                       # relatedness weight, not a support score
+    text: str
+
+
+@dataclass
 class Answer:
     support: float
     verdict: str                     # "settled" | "sparse" | "unwritten"
     hits: list[Hit]
+    related: list[Related] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
 
@@ -64,6 +82,7 @@ class _Pool:
     entries: list
     res: np.ndarray                  # resolution cosines (masked -> -inf)
     currency: np.ndarray
+    V: np.ndarray                    # float32 value rows, one per entry
     docs: list[list[str]] | None     # tokenized docs (re-derived pools only)
     superseded_by: dict[int, str]
     displaced: dict[str, float]
@@ -108,7 +127,7 @@ def _pool_from_views(st: core.FoldState, q: np.ndarray, source: str,
             at = entries[g[-1]].at
             for i in g[:-1]:
                 superseded_by[i] = at
-    return _Pool(source, entries, res, currency, None, superseded_by,
+    return _Pool(source, entries, res, currency, V[:n], None, superseded_by,
                  vw.displaced, views=vw)
 
 
@@ -216,7 +235,34 @@ def _build_pool(store: Store, st: core.FoldState, q: np.ndarray,
 
     docs = [tokenize((e.topic or "") + " " + e.text) if mask[i] else []
             for i, e in enumerate(entries)]
-    return _Pool(source, entries, res, currency, docs, superseded_by, displaced)
+    return _Pool(source, entries, res, currency, V[:n], docs, superseded_by,
+                 displaced)
+
+
+def _relate(pools: list[_Pool], origin: _Pool, row: int) -> list[Related]:
+    """The relate hop: the top hit's stored value row (unit vector, so a dot
+    IS the cosine) probes every OTHER consulted pool — origin excluded, so an
+    answer can never echo its own store. Up to RELATE_TOP live rows per pool
+    at or above RELATE_FLOOR, deduped by topic (keyless rows by hash)."""
+    v = origin.V[row]
+    out: list[Related] = []
+    for pool in pools:
+        if pool.source == origin.source:
+            continue
+        cos = pool.V @ v
+        cos[~np.isfinite(pool.res)] = -np.inf
+        taken: set[str] = set()
+        for i in np.argsort(-cos):
+            if cos[i] < RELATE_FLOOR or len(taken) == RELATE_TOP:
+                break
+            e = pool.entries[int(i)]
+            key = e.topic or e.h
+            if key in taken:
+                continue
+            taken.add(key)
+            out.append(Related(pool.source, e.topic, e.at, e.kind, e.h,
+                               float(cos[i]), e.text))
+    return out
 
 
 def ask(store: Store, question: str, top: int = 5, as_of: str | None = None,
@@ -270,7 +316,7 @@ def ask(store: Store, question: str, top: int = 5, as_of: str | None = None,
             raise SystemExit(f"no vault named '{wanted}' (see: mnema vault list)")
 
     if not pools or not any(np.isfinite(p.res).any() for p in pools):
-        return Answer(0.0, "unwritten", [], warnings)
+        return Answer(0.0, "unwritten", [], warnings=warnings)
 
     # ---- pool-global composition over the UNION of candidates
     res_all = np.concatenate([p.res for p in pools])
@@ -307,14 +353,19 @@ def ask(store: Store, question: str, top: int = 5, as_of: str | None = None,
                else "unwritten" if sup < SUPPORT_UNWRITTEN else "sparse")
 
     hits: list[Hit] = []
+    top_hit: tuple[_Pool, int] | None = None
     for gi in np.argsort(-final)[:top]:
         if not np.isfinite(final[gi]):
             continue
         pi = int(np.searchsorted(offsets, gi, side="right") - 1)
         pool = pools[pi]
         i = int(gi - offsets[pi])
+        if top_hit is None:
+            top_hit = (pool, i)
         e = pool.entries[i]
         hits.append(Hit(float(res_all[gi]), i, e.at, e.kind, e.topic, e.text,
                         pool.superseded_by.get(i), h=e.h,
                         displaced=pool.displaced.get(e.h), source=pool.source))
-    return Answer(round(sup, 2), verdict, hits, warnings)
+    related = (_relate(pools, *top_hit)
+               if top_hit is not None and len(pools) > 1 else [])
+    return Answer(round(sup, 2), verdict, hits, related, warnings)

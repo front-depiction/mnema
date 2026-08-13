@@ -25,7 +25,10 @@ mnema keep <hash>
   still surface under an `unwritten` verdict; the verdict rates the MATCH,
   never the corpus). Raw numbers are diagnostics behind `--scores`. Hits are real remembered entries, newest truth first;
   `<<superseded>>`/`<<displaced>>` annotations mean a newer belief exists —
-  prefer it.
+  prefer it. `↳ related (vault 0.75)` lines under the top hit are
+  relatedness, not answers: they say a belief connects across vaults, their
+  scale runs hot (claim-to-claim cosines), and they never carry verdict
+  semantics. If a connection matters, follow it: `mnema ask --from <vault>`.
 - **Answer from the hits, in your own words.** mnema never generates prose;
   you are the reader. Cite `at` timestamps when freshness matters.
 

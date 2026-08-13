@@ -149,6 +149,14 @@ $ mnema remember "..."                              # ALWAYS local — writes
                                                     # cannot reach a vault
 ```
 
+When a question spans stores, the top hit also takes one relate hop: its own
+value vector probes every *other* consulted store (never its origin), and
+`↳ related (alice 0.75): ...` lines under the first hit surface beliefs that
+connect across vaults. The number is a relatedness weight, not a support
+score — claim-to-claim cosines run hot, and these lines never carry verdict
+semantics. Follow one with `mnema ask --from <vault>` when the connection
+matters.
+
 Serving your store is one command, because its files are append-only and its
 config immutable:
 

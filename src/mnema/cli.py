@@ -123,7 +123,7 @@ def cmd_ask(args) -> None:
     print(f"{VERDICT_LINE[ans.verdict]}{when if not args.scores else ''}")
     for w in ans.warnings:
         print(f"  ! {w}")
-    for h in ans.hits:
+    for rank, h in enumerate(ans.hits):
         tag = f"  <<superseded by {h.superseded_by[:10]} write>>" if h.superseded_by else ""
         if h.displaced:
             tag += f"  <<displaced {h.displaced:.2f} by later write>>"
@@ -133,6 +133,14 @@ def cmd_ask(args) -> None:
         print(head)
         print(textwrap.fill(" ".join(h.text.split()), width=100,
                             initial_indent="          ", subsequent_indent="          "))
+        if rank == 0:
+            # cosine always shown: a relatedness weight, not a support score
+            for r in ans.related:
+                body = " ".join(r.text.split())
+                label = r.topic or body[:60] + ("..." if len(body) > 60 else "")
+                snippet = (" — " + body[:70] + ("..." if len(body) > 70 else "")
+                           if r.topic else "")
+                print(f"       ↳ related ({r.source} {r.cos:.2f}): {label}{snippet}")
 
 
 def cmd_log(args) -> None:
