@@ -9,3 +9,4 @@ dist/
 state.npz
 benchmarks/probes_local*.py
 uv.lock
+.lock

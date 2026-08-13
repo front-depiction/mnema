@@ -16,6 +16,7 @@ rebuilds)."""
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import time
@@ -131,10 +132,26 @@ class Store:
     def known_hashes(self) -> set[str]:
         return {e.h for e in self.entries()}
 
+    def _lock(self):
+        """Exclusive advisory lock for all log/vector/state mutation: the
+        positional alignment between log lines and vector rows is the one
+        invariant concurrent writers could corrupt."""
+        f = (self.path / ".lock").open("w")
+        fcntl.flock(f, fcntl.LOCK_EX)
+        return f
+
     def append(self, new: list[Entry]) -> int:
         """Dedupe against the log and append. Returns count actually added.
         An entry's optional `questions` expand into alias entries — extra
-        question-shaped ADDRESSES for the same belief, invisible at readout."""
+        question-shaped ADDRESSES for the same belief, invisible at readout.
+        Serialized against concurrent writers via the store lock."""
+        lock = self._lock()
+        try:
+            return self._append_locked(new)
+        finally:
+            lock.close()
+
+    def _append_locked(self, new: list[Entry]) -> int:
         seen = self.known_hashes()
         added = 0
         with (self.path / LOG).open("a") as f:

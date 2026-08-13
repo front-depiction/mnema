@@ -253,6 +253,13 @@ repeatedly.
 
 ### Write time: the fold
 
+Every derived view — the state `S`, the density `Λ`, the vectors, the
+supersession graph — is a fold of the same log, and they advance together as
+**one fused product fold**: `catch_up` is the single incremental transition
+`FoldState_{n+1} = step(FoldState_n, e_{n+1})`, continued from its
+checkpoint, never recomputed per view. The rule: anything derivable
+incrementally from the ledger advances in the same traversal.
+
 Every memory embeds to a unit content vector `v`; its address `k` is the
 embedding of its topic (or `v` itself when keyless), lifted through a fixed
 seeded random projection to dimension `D` (Johnson–Lindenstrauss preserves
@@ -344,7 +351,7 @@ by the full composition.
 | Property | Mechanism |
 |---|---|
 | No keys, no schema | prose is its own address; displacement is inferred, reported, and vetoable |
-| Append O(1), forever | one rank-one update; no index, no reindex, no compaction |
+| Append: fold update O(1) in history | one rank-one update; bookkeeping scans are linear today (index-fixable); no reindex, no compaction |
 | Constant-size state | `D×D` floats at 1 memory or 1M memories |
 | Stale beliefs can't compete | subtraction at write time (measured 0/75 stale-wins on a real 867-entry corpus at D≥2048) |
 | Knows what it doesn't know | nearest-address support: settled / sparse / unwritten |
