@@ -63,14 +63,17 @@ The loop that makes it work as long-term memory:
    (with timestamps, hashes, and displacement annotations), not generated
    summaries. The agent does its own reading; the log stays the authority.
 
-Appends are O(1) forever and the folded state is constant-size — but honesty
-about the read side: the log and the per-memory vectors grow with history,
-and `ask` is a **linear scan** over them (no index to maintain, and no
-quadratic terms anywhere — currency is evaluated only on the few entries in
-a declared supersession relationship). Linear scan is practical to roughly
-10^5 memories; beyond that, the architecture's scale path is candidate-set
-retrieval (ANN/lexical prefilter, then fold-currency inside the candidates)
-— the fold's semantics are unchanged by it.
+Scaling, stated honestly. The **fold update** is O(1) in history; today's
+write *bookkeeping* (dedupe, topic lookup, displacement inference) scans the
+log and vectors — linear with small constants, fixable with a persistent
+index if write volume ever demands it. The **read side** is linear in
+history with no quadratic terms — full K/V scans plus currency evaluated
+only on entries in a recorded supersession relationship. Practical limits
+depend on D and on the fraction of memories participating in supersession,
+and need benchmarking at scale rather than assertion. The architecture's
+scale path is candidate-set retrieval — ANN/lexical prefilter, expand by
+supersession-family edges, evaluate fold-currency inside that subgraph —
+which changes none of the fold's semantics.
 
 ## Pointing at different memories
 
@@ -300,10 +303,12 @@ fusion       RRF over ONE candidate pool       reciprocal-rank fusion of the
              (absence of evidence is not a rank)
 
 currency     cᵢ = ⟨S·kᵢ, vᵢ⟩ / max over the    does the belief still stand?
-             entry's address-cluster (≥0.9)    — reads the write-time
-             subtraction's testimony; normalized WITHIN an entry's own
-             address family only, so fold crosstalk cancels for strangers;
-             authority: supersession
+             entry's DECLARED supersession      — reads the write-time
+             family (same topic, or a live      subtraction's testimony,
+             displacement edge)                 normalized only among recorded
+             rivals. Unrelated entries hold currency 1 by definition —
+             semantic similarity finds things; recorded history decides what
+             supersedes what. Authority: supersession
 
 score        = RRF(r, lexical; g) × c
 support      = max rᵢ  →  settled / sparse / unwritten
@@ -372,11 +377,13 @@ beliefs count — displaced and superseded history refunds its space. Raise
 - **Not generative.** It routes to real memories; it never writes prose.
 - **Not enumeration.** The state answers similarity-shaped questions; "list
   everything" reads the log.
-- **Not a vector database, but honest about the overlap.** Reads do scan
-  stored vectors (linearly, index-free); what a vector DB cannot give you is
-  the folded state — supersession as arithmetic, currency, time travel,
-  exact undo, associative merge. The state is what stays constant; the log
-  grows, as truth should.
+- **Not a vector database — a temporal/supersession layer that could sit
+  behind any retrieval mechanism.** Reads currently scan stored vectors
+  (linearly, index-free), but the vector store is just the address resolver:
+  the log is history, and the fold is a compact representation of which
+  beliefs currently survive it — supersession as arithmetic, currency, time
+  travel, exact undo, associative merge. Swap the resolver (ANN, BM25,
+  anything); the fold's semantics ride along unchanged.
 
 ## The laws are tested
 
