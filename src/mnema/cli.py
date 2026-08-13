@@ -83,6 +83,9 @@ def cmd_ingest(args) -> None:
             continue
         for p in sorted(globlib.glob(pattern, recursive=True)):
             entries.extend(translate(Path(p)))
+    if args.at:
+        from dataclasses import replace
+        entries = [replace(e, at=args.at) for e in entries]
     entries.sort(key=lambda e: (e.at, e.h))
     long_n = sum(1 for e in entries if past_horizon(e.text))
     if args.infer:
@@ -297,6 +300,9 @@ def main() -> None:
     p.add_argument("--infer", action="store_true",
                    help="run displacement inference per entry, in order — the "
                         "state ends identical to remembering one at a time")
+    p.add_argument("--at", help="ISO timestamp stamped on every entry — papers "
+                                "should carry their publication date, not the "
+                                "file's mtime")
     p.add_argument("paths", nargs="+", help="files or globs")
     p.set_defaults(fn=cmd_ingest)
 

@@ -16,6 +16,7 @@ mnema = "mnema.cli:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
+paper = ["firecrawl-anydoc"]
 
 [build-system]
 requires = ["hatchling"]

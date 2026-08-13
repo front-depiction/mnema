@@ -90,4 +90,67 @@ def markdown(path: Path) -> list[Entry]:
     return out
 
 
-TRANSLATORS = {"jsonl": generic_jsonl, "ledger": plan_ledger, "markdown": markdown}
+NAV_SLUGS = {"contents", "table-of-contents", "list-of-tables", "list-of-figures", "index"}
+PACK_WORDS = 300
+
+
+def paper(path: Path) -> list[Entry]:
+    """Like `markdown`, but for whole papers: each section's paragraphs pack
+    into ~300-word chunks so every chunk fits the retrieval horizon. Chunk
+    topics extend the section slot — `<path>#<slug>`, `<path>#<slug>/2`, ... —
+    disjoint addresses, so nothing inside one paper supersedes anything else,
+    while re-ingesting an edited paper lands changed chunks on their existing
+    address. Pure-navigation sections (table of contents, index) are dropped.
+    Non-text formats (pdf, docx, epub, ...) convert via anydoc first."""
+    import re
+    import time
+    p = Path(path)
+    if p.suffix.lower() in (".md", ".markdown", ".txt"):
+        md = p.read_text()
+    else:
+        try:
+            import anydoc
+        except ImportError:
+            raise SystemExit(
+                f"reading {p.suffix} needs the optional document converter:\n"
+                '  uv pip install firecrawl-anydoc   (or: pip install "mnema[paper]")')
+        md = anydoc.to_markdown(str(p))
+    at = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(p.stat().st_mtime))
+    rel = str(p)
+    out: list[Entry] = []
+    heading, buf = "intro", []
+
+    def flush():
+        slug = re.sub(r"[^a-z0-9]+", "-", heading.lower()).strip("-") or "intro"
+        if slug in NAV_SLUGS:
+            return
+        paras = [q.strip() for q in re.split(r"\n\s*\n", "\n".join(buf)) if q.strip()]
+        chunks, cur, n = [], [], 0
+        for para in paras:
+            w = len(para.split())
+            if cur and n + w > PACK_WORDS:
+                chunks.append("\n\n".join(cur))
+                cur, n = [], 0
+            cur.append(para)
+            n += w
+        if cur:
+            chunks.append("\n\n".join(cur))
+        title = "" if heading == "intro" else f"{heading}\n"
+        for i, chunk in enumerate(c for c in chunks if len(c) >= 50):
+            suffix = "" if i == 0 else f"/{i + 1}"
+            out.append(Entry(text=f"{title}{chunk}", topic=f"{rel}#{slug}{suffix}",
+                             at=at, kind="doc"))
+
+    for line in md.splitlines():
+        m = re.match(r"^(#{1,3})\s+(.*)", line)
+        if m:
+            flush()
+            heading, buf = m.group(2).strip(), []
+        else:
+            buf.append(line)
+    flush()
+    return out
+
+
+TRANSLATORS = {"jsonl": generic_jsonl, "ledger": plan_ledger, "markdown": markdown,
+               "paper": paper}
