@@ -37,7 +37,7 @@ SUPPORT_UNWRITTEN = 0.55
 # pool. Claim-to-claim cosines run hot (0.65–0.80 is ordinary), so these are
 # relatedness weights — never support-verdict material.
 RELATE_FLOOR = 0.68
-RELATE_TOP = 2                       # rows surfaced per non-origin pool
+RELATE_TOP = 3                       # rows surfaced per non-origin pool
 
 VAULT_MATCH_KEYS = ("model", "dim", "seed", "sigma", "d_embed", "beta")
 

@@ -14,9 +14,11 @@ $ mnema remember "deploy freeze lifted — continuous deploys all week, canary-g
 
 $ mnema ask "can we deploy on friday?"
 settled — a strong match exists; the top result is trustworthy
+navigate: mnema show <hash> opens any memory in full · mnema ask --from <vault> "..." scopes a vault · refine the question to keep moving
 
-   2026-08-13  [note] ops/deploy-freeze 2d2c364f
-          deploy freeze lifted — continuous deploys all week, canary-gated
+<hit h="2d2c364f" at="2026-08-13" kind="note" topic="ops/deploy-freeze">
+  deploy freeze lifted — continuous deploys all week, canary-gated
+</hit>
 
 $ mnema ask "what is the office wifi password?"
 unwritten — nothing matches this well; nearest content shown, verify before trusting
@@ -143,8 +145,9 @@ local            ~/.mnema                                    412 memories
 alice            https://alice-mbp.tail1234.ts.net/mnema     876 memories
 
 $ mnema ask "did anyone rule on retry semantics?"   # local + every vault
-   0.74  2026-08-11  [note] — 8397fcd1  (vault: alice)
-         retries are per-event with capped backoff, ruled at ...
+<hit h="8397fcd1" at="2026-08-11" kind="note" vault="alice">
+  retries are per-event with capped backoff, ruled at ...
+</hit>
 
 $ mnema ask --from alice "..."                      # one vault, by name
 $ mnema ask --local "..."                           # your memory only
@@ -154,10 +157,10 @@ $ mnema remember "..."                              # ALWAYS local — writes
 
 When a question spans stores, the top hit also takes one relate hop: its own
 value vector probes every *other* consulted store (never its origin), and
-`↳ related (alice 0.75) 8397fcd1: ...` lines under the first hit surface
-beliefs that connect across vaults. The number is a relatedness weight, not a
-support score — claim-to-claim cosines run hot, and these lines never carry
-verdict semantics. Follow one with `mnema show <hash>` (the full memory,
+`<related h="8397fcd1" vault="alice" cos="0.75">` blocks inside the first hit
+surface beliefs that connect across vaults. The `cos` is a relatedness
+weight, not a support score — claim-to-claim cosines run hot, and these
+blocks never carry verdict semantics. Follow one with `mnema show <hash>` (the full memory,
 whichever vault it lives in) or `mnema ask --from <vault>` when the
 connection matters.
 

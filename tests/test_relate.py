@@ -119,7 +119,17 @@ def test_related_survive_the_legacy_as_of_path(tmp_path):
     assert [(r.source, r.topic) for r in ans.related] == [("alice", "miller")]
 
 
-def test_cli_prints_relate_lines_under_the_first_hit(tmp_path, monkeypatch, capsys):
+def _run_cli_ask(local, emb, monkeypatch, capsys, question):
+    from mnema import cli
+    monkeypatch.setattr("mnema.query.Embedder", lambda model: emb)
+    cli.cmd_ask(argparse.Namespace(
+        store=str(local.path), question=question, top=5,
+        as_of=None, current=False, slot=None, scores=False, local=False,
+        from_vault=None))
+    return capsys.readouterr().out
+
+
+def test_cli_prints_related_blocks_inside_the_first_hit(tmp_path, monkeypatch, capsys):
     table = {"delete the second copy": U, "what deletes duplicates?": U,
              "authority is fractal; duplicated power erodes": NEAR}
     local, emb = _pair(
@@ -129,17 +139,48 @@ def test_cli_prints_relate_lines_under_the_first_hit(tmp_path, monkeypatch, caps
           "2026-01-02T00:00:00Z")],
         table)
 
-    from mnema import cli
-    monkeypatch.setattr("mnema.query.Embedder", lambda model: emb)
-    cli.cmd_ask(argparse.Namespace(
-        store=str(local.path), question="what deletes duplicates?", top=5,
-        as_of=None, current=False, slot=None, scores=False, local=False,
-        from_vault=None))
-    out = capsys.readouterr().out
-    relate = next(l for l in out.splitlines() if "↳ related" in l)
-    assert "(alice 0.9" in relate and "miller" in relate
+    out = _run_cli_ask(local, emb, monkeypatch, capsys,
+                       "what deletes duplicates?")
+    relate = next(l for l in out.splitlines() if "<related " in l)
+    assert 'vault="alice"' in relate and 'cos="0.9' in relate
+    assert 'topic="miller"' in relate
     vault_h = Entry(text="authority is fractal; duplicated power erodes",
                     topic="miller", at="2026-01-02T00:00:00Z").h
-    assert (f"{vault_h[:8]}: miller — authority is fractal; "
-            "duplicated power erodes") in relate         # hash + full snippet
-    assert out.index("↳ related") < out.index("[note] miller")  # above hit 2
+    assert f'h="{vault_h[:8]}"' in relate                # hash present
+    assert "authority is fractal; duplicated power erodes" in out  # full snippet
+    first_hit_close = out.index("</hit>")
+    assert out.index("<related ") < first_hit_close      # inside hit 1 only
+    assert out.index("</related>") < first_hit_close
+    assert out.index(f'<hit h="{vault_h[:8]}"') > first_hit_close  # hit 2 after
+
+
+def test_cli_navigate_line_raw_attributes_and_three_related(
+        tmp_path, monkeypatch, capsys):
+    weird = 'rule <"x"> & y'
+    third = 0.90 * U + np.sqrt(1 - 0.90**2) * _basis(4)
+    table = {"delete the second copy": U, "what deletes duplicates?": U,
+             "authority is fractal; duplicated power erodes": NEAR,
+             "power fragments under duplication": NEAR2,
+             "duplicates decay the source": third,
+             weird: _basis(20), "t-one": _basis(21), "t-two": _basis(22),
+             "t-three": _basis(23)}
+    local, emb = _pair(
+        tmp_path,
+        [("delete the second copy", weird, "2026-01-01T00:00:00Z")],
+        [("authority is fractal; duplicated power erodes", "t-one",
+          "2026-01-02T00:00:00Z"),
+         ("power fragments under duplication", "t-two", "2026-01-03T00:00:00Z"),
+         ("duplicates decay the source", "t-three", "2026-01-04T00:00:00Z")],
+        table)
+
+    out = _run_cli_ask(local, emb, monkeypatch, capsys,
+                       "what deletes duplicates?")
+    lines = out.splitlines()
+    assert lines[1].startswith("navigate: ")             # present and second
+    assert "mnema show <hash>" in lines[1]
+    assert f'topic="{weird}"' in out                     # raw, never escaped
+    assert not any(esc in out for esc in ("&amp;", "&lt;", "&gt;", "&quot;"))
+    assert out.count("<related ") == 3                   # three clear the floor
+    assert out.count("</related>") == 3
+    relates = [l for l in lines if "<related " in l]
+    assert all('vault="alice"' in l for l in relates)

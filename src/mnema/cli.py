@@ -122,25 +122,42 @@ def cmd_ask(args) -> None:
                 "sparse": f"{SUPPORT_UNWRITTEN}–{SUPPORT_SETTLED}"}[ans.verdict]
         print(f"support {ans.support} (band {band}){when}")
     print(f"{VERDICT_LINE[ans.verdict]}{when if not args.scores else ''}")
+    print("navigate: mnema show <hash> opens any memory in full · "
+          "mnema ask --from <vault> \"...\" scopes a vault · "
+          "refine the question to keep moving")
     for w in ans.warnings:
-        print(f"  ! {w}")
+        print(f"! {w}")
+    # XML-shaped for readability, deliberately not parseable XML: attributes
+    # are metadata, bodies are raw prose — never escaped.
     for rank, h in enumerate(ans.hits):
-        tag = f"  <<superseded by {h.superseded_by[:10]} write>>" if h.superseded_by else ""
+        attrs = [f'h="{h.h[:8]}"', f'at="{h.at[:10]}"', f'kind="{h.kind}"']
+        if h.source != "local":
+            attrs.append(f'vault="{h.source}"')
+        if h.topic:
+            attrs.append(f'topic="{h.topic}"')
+        if h.superseded_by:
+            attrs.append(f'superseded="{h.superseded_by[:10]}"')
         if h.displaced:
-            tag += f"  <<displaced {h.displaced:.2f} by later write>>"
-        origin = "" if h.source == "local" else f"  (vault: {h.source})"
-        score = f"{h.score:6.3f}  " if args.scores else ""
-        head = f"\n  {score}{h.at[:10]}  [{h.kind}] {h.topic or '—'} {h.h[:8]}{origin}{tag}"
-        print(head)
+            attrs.append(f'displaced="{h.displaced:.2f}"')
+        if args.scores:
+            attrs.append(f'score="{h.score:.3f}"')
+        print(f"\n<hit {' '.join(attrs)}>")
         print(textwrap.fill(" ".join(h.text.split()), width=100,
-                            initial_indent="          ", subsequent_indent="          "))
+                            initial_indent="  ", subsequent_indent="  "))
         if rank == 0:
-            # cosine always shown: a relatedness weight, not a support score
+            # cos always shown: a relatedness weight, not a support score
             for r in ans.related:
+                rattrs = [f'h="{r.h[:8]}"', f'vault="{r.source}"',
+                          f'cos="{r.cos:.2f}"']
+                if r.topic:
+                    rattrs.append(f'topic="{r.topic}"')
                 body = " ".join(r.text.split())
-                snip = body[:140] + ("..." if len(body) > 140 else "")
-                label = f"{r.topic} — {snip}" if r.topic else snip
-                print(f"       ↳ related ({r.source} {r.cos:.2f}) {r.h[:8]}: {label}")
+                snip = body[:280] + ("..." if len(body) > 280 else "")
+                print(f"  <related {' '.join(rattrs)}>")
+                print(textwrap.fill(snip, width=100, initial_indent="    ",
+                                    subsequent_indent="    "))
+                print("  </related>")
+        print("</hit>")
 
 
 def cmd_show(args) -> None:

@@ -24,14 +24,28 @@ mnema keep <hash>
   `unwritten` = nothing matches well — nearest content is shown but must be
   verified before trusting (on conversational registers a true answer can
   still surface under an `unwritten` verdict; the verdict rates the MATCH,
-  never the corpus). Raw numbers are diagnostics behind `--scores`. Hits are real remembered entries, newest truth first;
-  `<<superseded>>`/`<<displaced>>` annotations mean a newer belief exists —
-  prefer it. `↳ related (vault 0.75)` lines under the top hit are
-  relatedness, not answers: they say a belief connects across vaults, their
-  scale runs hot (claim-to-claim cosines), and they never carry verdict
-  semantics. If a connection matters, follow it: `mnema show <hash>` reads
-  the full memory behind the line (any vault), or `mnema ask --from <vault>`
-  re-asks in that vault alone.
+  never the corpus). Raw numbers are diagnostics behind `--scores`. A
+  `navigate:` line follows with the moves that keep you going. Hits are real
+  remembered entries, newest truth first, printed as blocks:
+
+  ```
+  <hit h="2d2c364f" at="2026-08-13" kind="note" topic="ops/deploy-freeze">
+    deploy freeze lifted — continuous deploys all week, canary-gated
+    <related h="8397fcd1" vault="alice" cos="0.75" topic="ops/canary">
+      canary gates hold every deploy for one baking interval before...
+    </related>
+  </hit>
+  ```
+
+  The format contract: output is XML-shaped for readability, attributes are
+  metadata, bodies are raw prose — read it, don't parse it.
+  `superseded="<date>"`/`displaced="0.83"` attributes mean a newer belief
+  exists — prefer it. `<related>` blocks inside the top hit are relatedness,
+  not answers: they say a belief connects across vaults, their `cos` scale
+  runs hot (claim-to-claim cosines), and they never carry verdict semantics.
+  If a connection matters, follow it: `mnema show <hash>` reads the full
+  memory behind the block (any vault), or `mnema ask --from <vault>` re-asks
+  in that vault alone.
 - **Answer from the hits, in your own words.** mnema never generates prose;
   you are the reader. Cite `at` timestamps when freshness matters.
 
