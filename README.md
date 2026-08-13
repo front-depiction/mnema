@@ -96,6 +96,30 @@ are *facts* (established once, never recomputed); the fold is an *opinion*
 (which beliefs survive the whole ordered history) — and merge is precisely a
 re-derivation of the opinion over the union of facts.
 
+## The identity ladder
+
+Three levels of declared identity, one dimension: how much erasure-authority
+one write holds over another.
+
+| level | identity means | supersession | use for |
+|---|---|---|---|
+| bare prose | "similar belief" | graded by meaning, inferred, revocable | observations that drift |
+| topic | "same slot" | total, by exact string equality | beliefs that version |
+| store | "same authority" | none — disagreement surfaces, tagged | different believers |
+
+Two mechanisms, two triggers: **equality is the law** — an identical topic
+string fully replaces, regardless of content similarity (that is what
+declaring a topic means; `remember` warns when a declared replacement is
+semantically unrelated, the signature of a sibling mistaken for a version).
+**Similarity is the physics** — everything erodes neighbors in proportion to
+address closeness, including similar topic strings, since topics are embedded
+text. Prefixes (`linting/tsgo`, `linting/tslint`) have zero mechanics — the
+machine never parses a topic — they organize for humans and cluster mildly in
+embedding space. A topic is a slot, not a folder: before reusing one, the
+question is never "is this related?" but "does this replace what's there?"
+Siblings get sibling topics; category questions aggregate them through
+content matching automatically.
+
 ## Vaults: read many, write your own
 
 A vault is someone else's memory at a known address — a teammate's store on

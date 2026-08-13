@@ -82,20 +82,26 @@ was folded. Discipline for every `remember`:
 2. **Distill, don't dump.** Remember the conclusion ("we chose X over Y
    because Z"), never the transcript that produced it. Distilled beliefs also
    make displacement inference sharp.
-3. **Topic anything with a lifecycle.** Will a future write *replace* this
+3. **A topic is a slot, not a folder.** Same exact topic = "this REPLACES
+   what's there" — total erasure by declaration (a warning fires if the
+   replaced content is semantically unrelated: that's a sibling, not a
+   version). Co-valid facts get sibling topics (`linting/tsgo`,
+   `linting/tslint`) — prefixes are convention only, and category questions
+   find all siblings through content matching anyway.
+4. **Topic anything with a lifecycle.** Will a future write *replace* this
    (a policy, an owner, a schedule, a status)? → `--topic name` for exact
    supersession. One-off facts and observations stay keyless.
-4. **Scope stores by register.** Personal preferences, project rulings, and
+5. **Scope stores by register.** Personal preferences, project rulings, and
    chat digests belong in separate stores (`MNEMA_STORE` per context) —
    mixed-genre corpora blur verdicts and misfire displacement. Recombine at
    read time with vaults or `merge`.
-5. **Curate immediately.** Read the `displaced` lines after each remember and
+6. **Curate immediately.** Read the `displaced` lines after each remember and
    `keep` wrong inferences while you have context. `forget` noise, test
    entries, and accidents — both commands are exact and cheap.
-6. **Fix the corpus, not the phrasing.** If questions keep landing sparse,
+7. **Fix the corpus, not the phrasing.** If questions keep landing sparse,
    the store is missing a layer (e.g. definitional docs vs. operational
    decisions) — ingest the missing source instead of torturing queries.
-7. **History before life.** Bulk-ingest archives before daily writes (the
+8. **History before life.** Bulk-ingest archives before daily writes (the
    fold runs in log order), and check `mnema stats` occasionally — act on
    headroom warnings before recall degrades.
 
