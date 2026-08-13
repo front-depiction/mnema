@@ -7,6 +7,8 @@ Layout of a store directory:
     vec_v.f16     lifted value vectors, one fp16 row per log line (write-once)
     vec_k.f16     lifted key vectors, same
     state.npz     S, Lam (fp32) + n = number of rows folded
+    views.npz     read-side views (inverted index, topic/supersession maps)
+                  — same fold, same catch-up rules, same disposability
 
 Appends are O(1): one log line + two fp16 rows + a rank-one fold. Any command
 first runs catch_up(), which embeds/folds whatever the log has that the state
@@ -25,10 +27,11 @@ from pathlib import Path
 
 import numpy as np
 
-from . import core
+from . import core, views
 from .embed import Embedder
 
 CONFIG, LOG, VEC_V, VEC_K, STATE = "config.json", "log.jsonl", "vec_v.f16", "vec_k.f16", "state.npz"
+VIEWS = "views.npz"
 
 # Displacement inference (keyless entries only): a new entry attenuates prior
 # entries whose keys it lands near. Floor-gated, capped BELOW 1 — inferred
@@ -213,6 +216,23 @@ class Store:
         np.savez(tmp, S=st.S, Lam=st.Lam, ksum=st.ksum, n=st.n)
         tmp.rename(self.path / STATE)
 
+    def load_views(self) -> views.Views:
+        p = self.path / VIEWS
+        if not p.exists():
+            return views.Views.empty()
+        try:
+            return views.load(p)
+        except Exception:
+            return views.Views.empty()    # corrupt sidecar: refold is the fallback
+
+    def save_views(self, vw: views.Views) -> None:
+        tmp = self.path / (VIEWS + ".tmp.npz")
+        try:
+            views.save(vw, tmp)
+            tmp.rename(self.path / VIEWS)
+        except OSError:
+            pass    # read-only mirror: the in-memory views still serve this ask
+
     # -------------------------------------------------------------- catch-up
 
     def _embed_missing(self, embedder: Embedder | None, quiet: bool,
@@ -327,6 +347,15 @@ class Store:
             st = self._fold_ops(st, ops, K, V, chunk)
             st.n = n_vec
             self.save_state(st)
+        vw = getattr(self, "views", None)
+        if vw is None:
+            vw = self.load_views()
+        if vw.n > n_vec:
+            vw = views.Views.empty()
+        if vw.n < n_vec:
+            vw = views.advance(vw, entries[:n_vec], vw.n)
+            self.save_views(vw)
+        self.views = vw
         return st
 
     # -------------------------------------------------------------- inference

@@ -35,7 +35,7 @@ from typing import Callable, Protocol
 VAULTS = "vaults.json"
 CONFIG = "config.json"
 LOG = "log.jsonl"
-DERIVED = ["vec_v.f16", "vec_k.f16", "state.npz"]
+DERIVED = ["vec_v.f16", "vec_k.f16", "state.npz", "views.npz"]
 
 
 # ------------------------------------------------------------------ sources

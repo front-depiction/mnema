@@ -16,15 +16,17 @@ Currency stays store-local: supersession is a fact about one store's history."""
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass, field
 
 import numpy as np
 
 from . import core
 from .embed import Embedder
-from .lexical import bm25, gate_of, rrf, tokenize
+from .lexical import bm25_index, gate_of, rrf, tokenize
 from .store import VEC_K, VEC_V, Store
 from .vaults import load_vaults, sync_vault
+from .views import Views, postings_of
 
 # Nearest-address support bands (dense-cosine scale; calibrated on real
 # corpora — "sparse" honestly means "adjacent ground, no exact address").
@@ -62,9 +64,78 @@ class _Pool:
     entries: list
     res: np.ndarray                  # resolution cosines (masked -> -inf)
     currency: np.ndarray
-    docs: list[list[str]]
+    docs: list[list[str]] | None     # tokenized docs (re-derived pools only)
     superseded_by: dict[int, str]
     displaced: dict[str, float]
+    views: Views | None = None       # the fold's read-side views, when current
+
+
+def _views_of(store: Store) -> Views | None:
+    return getattr(store, "views", None)
+
+
+def _currency_of(st: core.FoldState, K: np.ndarray, V: np.ndarray, n: int,
+                 clusters: list[list[int]]) -> np.ndarray:
+    currency = np.ones(n, np.float32)
+    rows = sorted({j for cl in clusters for j in cl})
+    if rows:
+        Kr = K[rows]
+        agree = np.clip(np.einsum("ij,ij->i", Kr @ st.S.T, V[rows]), 1e-6, None)
+        a_of = dict(zip(rows, agree))
+        for cl in clusters:
+            mx = max(a_of[j] for j in cl)
+            for j in cl:
+                currency[j] = min(currency[j], np.float32(a_of[j] / mx))
+    return currency
+
+
+def _pool_from_views(st: core.FoldState, q: np.ndarray, source: str,
+                     entries: list, V: np.ndarray, K: np.ndarray,
+                     vw: Views) -> _Pool:
+    n = vw.n
+    res = np.maximum(K[:n] @ q, V[:n] @ q)
+    for ai, pi in vw.alias_parent:
+        res[pi] = max(res[pi], res[ai])  # extra address for the same belief
+    res[~vw.mask] = -np.inf
+
+    clusters = [g for g in vw.topic_groups.values() if len(g) > 1]
+    clusters += [list(pair) for pair in vw.disp_pairs]
+    currency = _currency_of(st, K, V, n, clusters)
+
+    superseded_by = {}
+    for g in vw.topic_groups.values():
+        if len(g) > 1:
+            at = entries[g[-1]].at
+            for i in g[:-1]:
+                superseded_by[i] = at
+    return _Pool(source, entries, res, currency, None, superseded_by,
+                 vw.displaced, views=vw)
+
+
+def _pool_doc_len(pool: _Pool) -> np.ndarray:
+    if pool.views is not None:
+        return pool.views.doc_len
+    return np.fromiter((len(d) for d in pool.docs), np.int32, len(pool.docs))
+
+
+def _pool_postings(pool: _Pool, q_terms: set[str]) -> dict:
+    """The query terms' (rows, tf) posting lists over this pool's rows — read
+    straight off the views' inverted index when current, else derived from
+    the ask-masked tokenized docs (--as-of/--current asks, lagging mirrors)."""
+    if pool.views is not None:
+        return {w: postings_of(pool.views, w) for w in q_terms}
+    posts: dict = {w: ([], []) for w in q_terms}
+    for i, d in enumerate(pool.docs):
+        if not d:
+            continue
+        tf = Counter(d)
+        for w in q_terms:
+            c = tf.get(w)
+            if c:
+                posts[w][0].append(i)
+                posts[w][1].append(c)
+    return {w: (np.asarray(rs, np.int32), np.asarray(ts, np.int32))
+            for w, (rs, ts) in posts.items()}
 
 
 def _build_pool(store: Store, st: core.FoldState, q: np.ndarray,
@@ -75,6 +146,15 @@ def _build_pool(store: Store, st: core.FoldState, q: np.ndarray,
     K = store.vectors(VEC_K).astype(np.float32)
     n = min(len(all_entries), V.shape[0], K.shape[0])
     entries = all_entries[:n]
+
+    # The persisted views ARE this derivation (the law: cached == recomputed);
+    # re-derive below only when the ask masks rows the fold cannot know about
+    # (--as-of, --current) or the views lag the log (an unwritable mirror
+    # whose vectors trail its entries).
+    vw = _views_of(store)
+    if (vw is not None and as_of is None and not current_only
+            and vw.n == n == len(all_entries)):
+        return _pool_from_views(st, q, source, entries, V, K, vw)
 
     retracted = store.retracted_hashes(entries)
     mask = np.array([(e.at <= as_of if as_of else True)
@@ -119,16 +199,7 @@ def _build_pool(store: Store, st: core.FoldState, q: np.ndarray,
                     and target_h not in retracted):   # a forgotten target must
                 clusters.append([i, row_of[target_h]])  # not depress a live rival
 
-    currency = np.ones(n, np.float32)
-    rows = sorted({j for cl in clusters for j in cl})
-    if rows:
-        Kr = K[rows]
-        agree = np.clip(np.einsum("ij,ij->i", Kr @ st.S.T, V[rows]), 1e-6, None)
-        a_of = dict(zip(rows, agree))
-        for cl in clusters:
-            mx = max(a_of[j] for j in cl)
-            for j in cl:
-                currency[j] = min(currency[j], np.float32(a_of[j] / mx))
+    currency = _currency_of(st, K, V, n, clusters)
 
     superseded_by = {}
     for i, e in enumerate(entries):
@@ -204,11 +275,26 @@ def ask(store: Store, question: str, top: int = 5, as_of: str | None = None,
     # ---- pool-global composition over the UNION of candidates
     res_all = np.concatenate([p.res for p in pools])
     cur_all = np.concatenate([p.currency for p in pools])
-    docs_all = [d for p in pools for d in p.docs]
     finite = np.isfinite(res_all)
+    offsets = np.cumsum([0] + [len(p.entries) for p in pools])
 
+    # Union BM25/IDF from per-pool posting lists: each store's views (or its
+    # re-derived docs) contribute the query terms' postings; df, N, and avgdl
+    # merge across stores, so rarity is judged against everything visible —
+    # the same statistics the corpus scan over concatenated docs produced.
     q_tokens = tokenize(question)
-    lex, df, n_docs = bm25(docs_all, q_tokens)
+    q_terms = set(q_tokens)
+    postings = {w: ([], []) for w in q_terms}
+    for pool, off in zip(pools, offsets):
+        for w, (rs, ts) in _pool_postings(pool, q_terms).items():
+            if len(rs):
+                postings[w][0].append(np.asarray(rs, np.int64) + off)
+                postings[w][1].append(np.asarray(ts))
+    merged = {w: (np.concatenate(rs) if rs else np.empty(0, np.int64),
+                  np.concatenate(ts) if ts else np.empty(0, np.int64))
+              for w, (rs, ts) in postings.items()}
+    doc_len_all = np.concatenate([_pool_doc_len(p) for p in pools])
+    lex, df, n_docs = bm25_index(merged, doc_len_all, q_tokens)
     gate = gate_of(q_tokens, df, n_docs)
     lex[~finite] = -np.inf
 
@@ -220,7 +306,6 @@ def ask(store: Store, question: str, top: int = 5, as_of: str | None = None,
     verdict = ("settled" if sup >= SUPPORT_SETTLED
                else "unwritten" if sup < SUPPORT_UNWRITTEN else "sparse")
 
-    offsets = np.cumsum([0] + [len(p.entries) for p in pools])
     hits: list[Hit] = []
     for gi in np.argsort(-final)[:top]:
         if not np.isfinite(final[gi]):

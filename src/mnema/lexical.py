@@ -57,6 +57,30 @@ def bm25(doc_tokens: list[list[str]], q_tokens: list[str],
     return scores, df, N
 
 
+def bm25_index(postings: dict[str, tuple[np.ndarray, np.ndarray]],
+               doc_len: np.ndarray, q_tokens: list[str],
+               k1: float = 1.5, b: float = 0.75) -> tuple[np.ndarray, Counter, int]:
+    """BM25 from an inverted index: identical scores to bm25() while touching
+    only the query terms' posting lists. postings maps each query term to its
+    (rows, tf) arrays over the pool; doc_len holds every row's token count
+    (0 for rows outside the corpus, which still count toward N and avgdl,
+    exactly as bm25() counts their empty docs). df = posting-list length."""
+    N = len(doc_len)
+    avgdl = int(doc_len.sum()) / max(N, 1)
+    df: Counter = Counter()
+    scores = np.zeros(N, np.float64)
+    for w in set(q_tokens):
+        rows, tf = postings.get(w, (None, None))
+        if rows is None or not len(rows):
+            continue
+        df[w] = len(rows)
+        idf = math.log(1 + (N - df[w] + 0.5) / (df[w] + 0.5))
+        n = tf.astype(np.float64)
+        scores[rows] += (idf * n * (k1 + 1)
+                         / (n + k1 * (1 - b + b * doc_len[rows].astype(np.float64) / avgdl)))
+    return scores.astype(np.float32), df, N
+
+
 def gate_of(q_tokens: list[str], df: Counter, N: int) -> float:
     """Jurisdiction of the lexical view: 0 unless the query contains a
     corpus-rare term, ramping to 1 as the rarest term's IDF grows."""

@@ -218,6 +218,7 @@ log.jsonl     append-only memories — THE source of truth
 vec_v.f16     value vectors (write-once, one row per memory)
 vec_k.f16     key vectors
 state.npz     the matrix S, the support matrix Λ, and the fold cursor
+views.npz     read-side views: inverted lexical index, topic/supersession maps
 ```
 
 The log is authoritative; everything else is a disposable cache. Delete
