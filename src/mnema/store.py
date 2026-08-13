@@ -37,6 +37,13 @@ INFER_FLOOR = 0.72
 INFER_CAP = 0.90
 INFER_TOPK = 3
 
+# Bulk displacement inference compares each new key against every strictly-
+# prior key (growing candidate pool) — same semantics as remembering one at a
+# time. Blocking bounds the per-GEMM candidate matrix to BLOCK rows instead of
+# one BLAS call per entry, which is what turns this into scalar-loop overhead
+# on large loads.
+INFER_BLOCK = 256
+
 # The embedder reads ~512 tokens; content beyond never reaches the index.
 # Writes past this horizon get a WARNING (loud beats silent) — split long
 # memories into coherent entries, which also retrieves better (measured).
@@ -191,8 +198,9 @@ class Store:
 
     # -------------------------------------------------------------- catch-up
 
-    def _embed_missing(self, embedder: Embedder | None, quiet: bool) -> list[Entry]:
-        entries = self.entries()
+    def _embed_missing(self, embedder: Embedder | None, quiet: bool,
+                       entries: list[Entry] | None = None) -> list[Entry]:
+        entries = entries if entries is not None else self.entries()
         n_vec = min(self._rows_on_disk(VEC_V), self._rows_on_disk(VEC_K))
         missing = entries[n_vec:]
         if missing:
@@ -280,14 +288,17 @@ class Store:
         return flush(st)
 
     def catch_up(self, embedder: Embedder | None = None, chunk: int = core.CHUNK,
-                 quiet: bool = False, embed_missing: bool = True) -> core.FoldState:
+                 quiet: bool = False, embed_missing: bool = True,
+                 entries: list[Entry] | None = None) -> core.FoldState:
         """Embed and fold whatever the log has that derived data hasn't.
         The universal entry point: every command calls this first. A new
         `keep` event forces a clean refold so revocation is exact.
         embed_missing=False folds only rows whose vectors already exist —
-        model-free, used for read-only peer mirrors."""
-        entries = (self._embed_missing(embedder, quiet) if embed_missing
-                   else self.entries())
+        model-free, used for read-only peer mirrors.
+        entries lets a caller that already parsed the log hand it in, so one
+        command invocation doesn't re-read log.jsonl per step."""
+        entries = (self._embed_missing(embedder, quiet, entries=entries) if embed_missing
+                   else (entries if entries is not None else self.entries()))
         st = self.load_state()
         n_vec = min(self._rows_on_disk(VEC_V), self._rows_on_disk(VEC_K))
         if any(e.kind in ("keep", "retract") for e in entries[st.n:n_vec]):
@@ -310,8 +321,8 @@ class Store:
         supersession). Returns (added, [(displaced_entry, weight), ...])."""
         if embedder is None:
             embedder = Embedder(self.cfg["model"])
-        self.catch_up(embedder, quiet=True)
         entries = self.entries()
+        self.catch_up(embedder, quiet=True, entries=entries)
         if entry.h in {e.h for e in entries}:
             return False, []
 
@@ -319,7 +330,7 @@ class Store:
             # topic collision check: a legitimate version is semantically near
             # what it replaces; low similarity means a SIBLING is about to be
             # erased by accident (topic used as a folder, not a slot).
-            last = self.latest_by_topic()
+            last = self.latest_by_topic(entries)
             if entry.topic in last:
                 prior_i = last[entry.topic]
                 value_lift0, _ = self._lift_ops()
@@ -364,8 +375,8 @@ class Store:
         Returns (entries_added, displacements_inferred)."""
         if embedder is None:
             embedder = Embedder(self.cfg["model"])
-        self.catch_up(embedder, quiet=True)
         existing = self.entries()
+        self.catch_up(embedder, quiet=True, entries=existing)
         known = {e.h for e in existing}
         uniq: list[Entry] = []
         for e in entries:
@@ -383,21 +394,44 @@ class Store:
         n0 = self._rows_on_disk(VEC_K)
         Kbuf = np.empty((n0 + len(uniq), self.dim), np.float32)
         Kbuf[:n0] = self.vectors(VEC_K).astype(np.float32)
+        for i, e in enumerate(uniq):
+            Kbuf[n0 + i] = K_new[i] = core.bind_slots(K_new[i], e.slots, self.cfg["seed"])
+
+        # Displacement inference compares each new key against every
+        # strictly-prior key — same candidate pool a sequential `remember`
+        # would see. That's inherent (any prior belief can be displaced), but
+        # doing it as one small matvec + argsort per entry is scalar-loop
+        # overhead: O(len(uniq)) tiny BLAS calls on top of the O(N^2 D) work.
+        # Block the new entries and run one wide GEMM per block instead — the
+        # per-row top-k selection below stays a loop (cheap: INFER_TOPK=3),
+        # only the FLOP-heavy comparison is batched.
         all_entries = existing + uniq
         n_disp = 0
-        for i, e in enumerate(uniq):
-            k = core.bind_slots(K_new[i], e.slots, self.cfg["seed"])
-            Kbuf[n0 + i], K_new[i] = k, k
-            if e.topic or n0 + i == 0:
-                continue
-            cos = Kbuf[: n0 + i] @ k
-            for j in np.argsort(-cos)[:INFER_TOPK]:
-                c = float(cos[j])
-                target = all_entries[j]
-                if c < INFER_FLOOR or target.kind == "keep":
+        for b0 in range(0, len(uniq), INFER_BLOCK):
+            b1 = min(b0 + INFER_BLOCK, len(uniq))
+            cos_block = Kbuf[n0 + b0:n0 + b1] @ Kbuf[:n0 + b1].T
+            for r in range(b1 - b0):
+                i = b0 + r
+                e = uniq[i]
+                valid = n0 + i                      # causal cutoff: strictly-prior keys only
+                if e.topic or valid == 0:
                     continue
-                e.displaces.append([target.h, round(min(INFER_CAP, c), 3)])
-                n_disp += 1
+                cos = cos_block[r, :valid]
+                # top-INFER_TOPK by score, descending — argpartition is O(valid)
+                # instead of argsort's O(valid log valid); summed over a bulk
+                # load that's the difference between O(N^2) and O(N^2 log N).
+                if valid > INFER_TOPK:
+                    part = np.argpartition(-cos, INFER_TOPK - 1)[:INFER_TOPK]
+                    top = part[np.argsort(-cos[part])]
+                else:
+                    top = np.argsort(-cos)
+                for j in top:
+                    c = float(cos[j])
+                    target = all_entries[j]
+                    if c < INFER_FLOOR or target.kind == "keep":
+                        continue
+                    e.displaces.append([target.h, round(min(INFER_CAP, c), 3)])
+                    n_disp += 1
 
         added = self.append(uniq)
         self._append_vectors(VEC_V, V_new)
@@ -420,8 +454,8 @@ class Store:
 
     # -------------------------------------------------------------- views
 
-    def latest_by_topic(self) -> dict[str, int]:
-        entries = self.entries()
+    def latest_by_topic(self, entries: list[Entry] | None = None) -> dict[str, int]:
+        entries = entries if entries is not None else self.entries()
         retracted = self.retracted_hashes(entries)
         last: dict[str, int] = {}
         for i, e in enumerate(entries):
@@ -430,11 +464,11 @@ class Store:
             last[e.topic or f"__anon__{i}"] = i
         return last
 
-    def forget(self, targets: list[str]) -> list[Entry]:
+    def forget(self, targets: list[str], entries: list[Entry] | None = None) -> list[Entry]:
         """Retract entries by hash: append retraction events and refold.
         The state returns to exactly what it would be had they never been
         written — reversal by re-derivation from the corrected event set."""
-        entries = self.entries()
+        entries = entries if entries is not None else self.entries()
         already = self.retracted_hashes(entries)
         by_h = {e.h: e for e in entries if e.kind not in ("keep", "retract")}
         resolved: list[Entry] = []
@@ -449,10 +483,10 @@ class Store:
         self.catch_up(quiet=True)                 # model-free: forces exact refold
         return resolved
 
-    def fold_prefix(self, upto_at: str) -> core.FoldState:
+    def fold_prefix(self, upto_at: str, entries: list[Entry] | None = None) -> core.FoldState:
         """Materialize the state as of a timestamp (time travel). Refolds the
         prefix with the chunked rule — O(n D^2) as GEMMs, seconds in practice."""
-        entries = self.entries()
+        entries = entries if entries is not None else self.entries()
         idx = [i for i, e in enumerate(entries) if e.at <= upto_at]
         st = core.FoldState.empty(self.dim)
         if not idx:
@@ -462,7 +496,9 @@ class Store:
         return core.fold(st, K, V, self.cfg["beta"])
 
 
-def merge(a: Store, b: Store, out_path: Path) -> Store:
+def merge(a: Store, b: Store, out_path: Path,
+         a_entries: list[Entry] | None = None,
+         b_entries: list[Entry] | None = None) -> Store:
     """Merge two stores with identical configs into a new store: interleave
     logs by timestamp, dedupe, reuse both stores' vectors (no re-embedding),
     fold once. Associativity is what makes this lawful."""
@@ -470,8 +506,8 @@ def merge(a: Store, b: Store, out_path: Path) -> Store:
         if a.cfg[key] != b.cfg[key]:
             raise SystemExit(f"config mismatch on '{key}': {a.cfg[key]} != {b.cfg[key]}")
     rows: dict[str, tuple[Entry, Store, int]] = {}
-    for s in (a, b):
-        for i, e in enumerate(s.entries()):
+    for s, s_entries in ((a, a_entries), (b, b_entries)):
+        for i, e in enumerate(s_entries if s_entries is not None else s.entries()):
             rows.setdefault(e.h, (e, s, i))
     ordered = sorted(rows.values(), key=lambda t: (t[0].at, t[0].h))
 
@@ -479,10 +515,10 @@ def merge(a: Store, b: Store, out_path: Path) -> Store:
                      a.cfg["sigma"], a.cfg["seed"], a.cfg["d_embed"])
     out.append([e for e, _, _ in ordered])
     for name, sel in ((VEC_V, 0), (VEC_K, 1)):
-        chunks = []
-        for e, src, i in ordered:
-            vecs = src.vectors(name)
-            chunks.append(np.asarray(vecs[i]))
+        # one memmap per source store, not one per row: `vectors()` opens and
+        # reshapes the file each call, and ordered can hold thousands of rows.
+        vecs_by_store = {s: s.vectors(name) for s in (a, b)}
+        chunks = [np.asarray(vecs_by_store[src][i]) for _, src, i in ordered]
         out._append_vectors(name, np.stack(chunks))
     out.catch_up(quiet=True)
     return out

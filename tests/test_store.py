@@ -1,6 +1,8 @@
 """Store behavior: append-only log, catch-up, dedupe, merge — with a fake
 embedder so no model is needed."""
 
+import time
+
 import numpy as np
 import pytest
 
@@ -182,6 +184,30 @@ def test_bulk_ingest_inferred_equals_sequential_remembers(tmp_path):
     assert added == 3 and n_disp == 1
     assert [e.displaces for e in bulk.entries()] == [e.displaces for e in seq.entries()]
     np.testing.assert_allclose(bulk.load_state().S, seq.load_state().S, atol=1e-5)
+
+
+def test_bulk_ingest_inferred_scales_subquadratically(tmp_path):
+    """Regression guard: displacement inference on a bulk load compares each
+    new key against every strictly-prior key — inherent (any prior belief
+    can be displaced), same candidate pool a sequential `remember` would see.
+    But doing that comparison as one small matvec + full argsort per entry
+    is scalar-loop overhead on top of the inherent cost, and it compounds
+    badly at scale. At a production-scale fold dimension, 8000 keyless
+    entries must stay well clear of what a per-row Python loop takes."""
+    dim = 1024
+    s = Store.init(tmp_path / "scale", model="fake", dim=dim, beta=1.0,
+                   sigma=None, seed=7, d_embed=32)
+    n = 8000
+    entries = [Entry(text=f"synthetic fact {i}",
+                     at=f"2026-01-{1 + i // 1000:02d}T00:00:{i % 60:02d}.{i % 1000:03d}Z")
+              for i in range(n)]
+    t0 = time.perf_counter()
+    added, _ = s.ingest_inferred(entries, FakeEmbedder())
+    elapsed = time.perf_counter() - t0
+    assert added == n
+    # blocked-matmul + argpartition finishes in ~1.5-2s here; a per-row
+    # matvec+argsort loop takes 6s+ at this N/D — generous middle ground.
+    assert elapsed < 4.0
 
 
 def test_forget_exactly_reverts_an_accidental_ingest(tmp_path):

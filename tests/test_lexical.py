@@ -109,3 +109,33 @@ def test_topic_collision_warns_on_unrelated_overwrite(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "UNRELATED content" in out          # sibling-erasure detected
     assert "sibling topics" in out
+
+
+def test_forgotten_displacement_target_cannot_depress_live_currency(tmp_path):
+    """Reviewer-caught edge: build_ops skips retracted displacement targets,
+    but the currency cluster builder did not — a forgotten target could join
+    a normalization denominator and depress its displacer's currency."""
+    import numpy as np
+    from mnema import query as Q
+    from test_store import ControlledEmbedder
+    u = np.zeros(32); u[0] = 1.0
+    orth = np.zeros(32); orth[1] = 1.0
+    emb = ControlledEmbedder({
+        "old venue": u,
+        "new venue": 0.9 * u + np.sqrt(1 - 0.81) * orth,   # cos 0.9: displaces
+    })
+    s = make_store(tmp_path, "rtl")
+    s.remember_inferred(Entry(text="old venue", at="2026-01-01T00:00:00Z"), emb)
+    _, disp = s.remember_inferred(Entry(text="new venue", at="2026-02-01T00:00:00Z"), emb)
+    assert disp, "test needs an inferred displacement to exist"
+    target = disp[0][0]
+    s.forget([target.h])
+
+    st = s.catch_up(emb, quiet=True)
+    entries = s.entries()
+    q = np.zeros(64, np.float32); q[0] = 1.0
+    pool = Q._build_pool(s, st, q, None, False, "local")
+    live = [i for i, e in enumerate(entries)
+            if e.kind == "note" and e.h != target.h]
+    for i in live:
+        assert pool.currency[i] == 1.0     # no live rival -> full currency

@@ -143,13 +143,14 @@ def cmd_log(args) -> None:
         store = Store(V.sync_vault(store.path, match[0]))
         source = args.from_vault
 
-    retracted = store.retracted_hashes()
-    entries = [e for e in store.entries()
+    all_entries = store.entries()
+    retracted = store.retracted_hashes(all_entries)
+    entries = [e for e in all_entries
                if e.kind not in ("keep", "retract") and e.h not in retracted]
-    last = store.latest_by_topic()
-    revoked = {e.target for e in store.entries() if e.kind == "keep" and e.target}
+    last = store.latest_by_topic(all_entries)
+    revoked = {e.target for e in all_entries if e.kind == "keep" and e.target}
     displaced = {}
-    for e in store.entries():
+    for e in all_entries:
         for target_h, w in e.displaces:
             if target_h not in revoked:
                 displaced[target_h] = max(displaced.get(target_h, 0.0), w)
@@ -176,14 +177,16 @@ def cmd_log(args) -> None:
 def cmd_forget(args) -> None:
     store = Store(Path(args.store))
     targets = list(args.hashes)
+    entries = None
     if args.last:
-        retracted = store.retracted_hashes()
-        live = [e for e in store.entries()
+        entries = store.entries()
+        retracted = store.retracted_hashes(entries)
+        live = [e for e in entries
                 if e.kind not in ("keep", "retract") and e.h not in retracted]
         targets.extend(e.h for e in live[-args.last:])
     if not targets:
         raise SystemExit("nothing to forget: pass hash prefixes and/or --last N")
-    forgotten = store.forget(targets)
+    forgotten = store.forget(targets, entries=entries)
     for e in forgotten:
         snippet = " ".join(e.text.split())[:80]
         print(f"forgot {e.h[:8]}  \"{snippet}\"")
@@ -224,8 +227,8 @@ def cmd_vault(args) -> None:
 
 def cmd_stats(args) -> None:
     store = Store(Path(args.store))
-    st = store.catch_up(quiet=True)
     entries = store.entries()
+    st = store.catch_up(quiet=True, entries=entries)
     topics = {e.topic for e in entries if e.topic}
     gauge = core.spectral_gauge(st)
     sizes = {f.name: f.stat().st_size for f in Path(args.store).iterdir() if f.is_file()}
@@ -247,9 +250,10 @@ def cmd_stats(args) -> None:
 
 def cmd_merge(args) -> None:
     a, b = Store(Path(args.store)), Store(Path(args.other))
-    a.catch_up(quiet=True)
-    b.catch_up(quiet=True)
-    merged = merge(a, b, Path(args.out))
+    a_entries, b_entries = a.entries(), b.entries()
+    a.catch_up(quiet=True, entries=a_entries)
+    b.catch_up(quiet=True, entries=b_entries)
+    merged = merge(a, b, Path(args.out), a_entries=a_entries, b_entries=b_entries)
     print(f"merged {args.store} + {args.other} -> {args.out} "
           f"({len(merged.entries())} entries)")
 

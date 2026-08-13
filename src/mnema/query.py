@@ -68,12 +68,13 @@ class _Pool:
 
 
 def _build_pool(store: Store, st: core.FoldState, q: np.ndarray,
-                as_of: str | None, current_only: bool, source: str) -> _Pool:
-    entries = store.entries()
+                as_of: str | None, current_only: bool, source: str,
+                entries: list | None = None) -> _Pool:
+    all_entries = entries if entries is not None else store.entries()
     V = store.vectors(VEC_V).astype(np.float32)
     K = store.vectors(VEC_K).astype(np.float32)
-    n = min(len(entries), V.shape[0], K.shape[0])
-    entries = entries[:n]
+    n = min(len(all_entries), V.shape[0], K.shape[0])
+    entries = all_entries[:n]
 
     retracted = store.retracted_hashes(entries)
     mask = np.array([(e.at <= as_of if as_of else True)
@@ -81,7 +82,7 @@ def _build_pool(store: Store, st: core.FoldState, q: np.ndarray,
                      and e.h not in retracted
                      for e in entries], dtype=bool)
 
-    last = store.latest_by_topic()
+    last = store.latest_by_topic(all_entries)
     if current_only:
         current_idx = set(last.values())
         for i in range(n):
@@ -114,8 +115,9 @@ def _build_pool(store: Store, st: core.FoldState, q: np.ndarray,
         if e.h in retracted:
             continue
         for target_h, _w in e.displaces:
-            if target_h in row_of and target_h not in revoked:
-                clusters.append([i, row_of[target_h]])
+            if (target_h in row_of and target_h not in revoked
+                    and target_h not in retracted):   # a forgotten target must
+                clusters.append([i, row_of[target_h]])  # not depress a live rival
 
     currency = np.ones(n, np.float32)
     rows = sorted({j for cl in clusters for j in cl})
@@ -162,10 +164,12 @@ def ask(store: Store, question: str, top: int = 5, as_of: str | None = None,
     warnings: list[str] = []
 
     if vaults in ("all", "local"):
-        st = store.catch_up(embedder, quiet=True)
+        entries = store.entries()
+        st = store.catch_up(embedder, quiet=True, entries=entries)
         if as_of:
-            st = store.fold_prefix(as_of)
-        pools.append(_build_pool(store, st, q, as_of, current_only, "local"))
+            st = store.fold_prefix(as_of, entries=entries)
+        pools.append(_build_pool(store, st, q, as_of, current_only, "local",
+                                 entries=entries))
 
     if vaults != "local":
         wanted = None if vaults == "all" else vaults
@@ -185,11 +189,12 @@ def ask(store: Store, question: str, top: int = 5, as_of: str | None = None,
                 warnings.append(f"vault '{vault['name']}' skipped: "
                                 f"config differs on {mismatch}")
                 continue
-            vst = vs.catch_up(quiet=True, embed_missing=False)
+            vault_entries = vs.entries()
+            vst = vs.catch_up(quiet=True, embed_missing=False, entries=vault_entries)
             if as_of:
-                vst = vs.fold_prefix(as_of)
+                vst = vs.fold_prefix(as_of, entries=vault_entries)
             pools.append(_build_pool(vs, vst, q, as_of, current_only,
-                                     vault["name"]))
+                                     vault["name"], entries=vault_entries))
         if wanted and not matched:
             raise SystemExit(f"no vault named '{wanted}' (see: mnema vault list)")
 
@@ -202,8 +207,9 @@ def ask(store: Store, question: str, top: int = 5, as_of: str | None = None,
     docs_all = [d for p in pools for d in p.docs]
     finite = np.isfinite(res_all)
 
-    lex, df, n_docs = bm25(docs_all, tokenize(question))
-    gate = gate_of(tokenize(question), df, n_docs)
+    q_tokens = tokenize(question)
+    lex, df, n_docs = bm25(docs_all, q_tokens)
+    gate = gate_of(q_tokens, df, n_docs)
     lex[~finite] = -np.inf
 
     fused = rrf(res_all, lex, weight=gate)
