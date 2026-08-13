@@ -13,13 +13,13 @@ $ mnema remember "deploy freeze lifted — continuous deploys all week, canary-g
   displaced 8397fcd1  [attenuated 0.83]  "the deploy freeze is on: no production deploys..."
 
 $ mnema ask "can we deploy on friday?"
-support 0.71  →  settled
+settled — a strong match exists; the top result is trustworthy
 
-   0.74  deploy freeze lifted — continuous deploys all week, canary-gated
+   2026-08-13  [note] ops/deploy-freeze 2d2c364f
+          deploy freeze lifted — continuous deploys all week, canary-gated
 
 $ mnema ask "what is the office wifi password?"
-support 0.53  →  unwritten
-  (no ruling exists in this region — weak matches below are neighbors, not answers)
+unwritten — nothing matches this well; nearest content shown, verify before trusting
 ```
 
 No key was ever given. The second memory *found* the first one — because it

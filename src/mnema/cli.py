@@ -105,23 +105,28 @@ def cmd_ask(args) -> None:
     scope = "local" if args.local else (args.from_vault or "all")
     ans = ask(store, args.question, top=args.top, as_of=args.as_of,
               current_only=args.current, slots=_slots(args.slot), vaults=scope)
-    from .query import SUPPORT_SETTLED, SUPPORT_UNWRITTEN
     when = f" as of {args.as_of}" if args.as_of else ""
-    band = {"settled": f"≥{SUPPORT_SETTLED}", "unwritten": f"<{SUPPORT_UNWRITTEN}",
-            "sparse": f"{SUPPORT_UNWRITTEN}–{SUPPORT_SETTLED}"}[ans.verdict]
-    print(f"support {ans.support}  →  {ans.verdict} (band {band}){when}")
+    VERDICT_LINE = {
+        "settled": "settled — a strong match exists; the top result is trustworthy",
+        "sparse": "sparse — likely in the results below; read critically",
+        "unwritten": "unwritten — nothing matches this well; nearest content "
+                     "shown, verify before trusting",
+    }
+    if args.scores:
+        from .query import SUPPORT_SETTLED, SUPPORT_UNWRITTEN
+        band = {"settled": f"≥{SUPPORT_SETTLED}", "unwritten": f"<{SUPPORT_UNWRITTEN}",
+                "sparse": f"{SUPPORT_UNWRITTEN}–{SUPPORT_SETTLED}"}[ans.verdict]
+        print(f"support {ans.support} (band {band}){when}")
+    print(f"{VERDICT_LINE[ans.verdict]}{when if not args.scores else ''}")
     for w in ans.warnings:
         print(f"  ! {w}")
-    if ans.verdict == "unwritten":
-        print("  (no address near this question — listed matches are neighbors, "
-              "not answers; note: hit scores are retrieval strengths, a different "
-              "scale than support)")
     for h in ans.hits:
         tag = f"  <<superseded by {h.superseded_by[:10]} write>>" if h.superseded_by else ""
         if h.displaced:
             tag += f"  <<displaced {h.displaced:.2f} by later write>>"
         origin = "" if h.source == "local" else f"  (vault: {h.source})"
-        head = f"\n  {h.score:6.3f}  {h.at[:10]}  [{h.kind}] {h.topic or '—'} {h.h[:8]}{origin}{tag}"
+        score = f"{h.score:6.3f}  " if args.scores else ""
+        head = f"\n  {score}{h.at[:10]}  [{h.kind}] {h.topic or '—'} {h.h[:8]}{origin}{tag}"
         print(head)
         print(textwrap.fill(" ".join(h.text.split()), width=100,
                             initial_indent="          ", subsequent_indent="          "))
@@ -300,6 +305,8 @@ def main() -> None:
     p.add_argument("--from", dest="from_vault", metavar="VAULT",
                    help="ask one named vault only (e.g. --from alice)")
     p.add_argument("--local", action="store_true", help="skip vaults entirely")
+    p.add_argument("--scores", action="store_true",
+                   help="show raw support and per-hit cosines (diagnostics)")
     p.set_defaults(fn=cmd_ask)
 
     p = sub.add_parser("serve", help="warm-model daemon: makes ask/remember ~instant")

@@ -18,10 +18,12 @@ mnema keep <hash>
   inference is wrong — the displaced belief is NOT actually replaced by what
   you wrote — restore it immediately with `mnema keep 8397fcd1`. Hashes are
   pronouns the system prints for you; never invent one.
-- **ask**: the `support ... → settled|sparse|unwritten` line comes first.
-  `unwritten` means this memory holds nothing there — do not treat the listed
-  neighbors as answers. `sparse` means adjacent ground exists; read hits
-  critically. Hits are real remembered entries, newest truth first;
+- **ask**: the verdict line comes first, in words: `settled` = the top
+  result is trustworthy; `sparse` = likely in the results, read critically;
+  `unwritten` = nothing matches well — nearest content is shown but must be
+  verified before trusting (on conversational registers a true answer can
+  still surface under an `unwritten` verdict; the verdict rates the MATCH,
+  never the corpus). Raw numbers are diagnostics behind `--scores`. Hits are real remembered entries, newest truth first;
   `<<superseded>>`/`<<displaced>>` annotations mean a newer belief exists —
   prefer it.
 - **Answer from the hits, in your own words.** mnema never generates prose;
@@ -135,9 +137,10 @@ your memory, serve your store directory over HTTP (see `src/mnema/vaults.py`).
 Phrase vault questions in the THIRD person ("who owns this store", "what did
 alice decide about X") — a vault's memories speak in their owner's voice, so
 "my"/"I" in your question refers to the wrong person. Support verdicts are
-calibrated conservatively: on small or conversational vaults, a correct answer
-may sit in the `sparse` band — read hits critically rather than discarding
-them. Hit scores are retrieval strengths, not the same scale as support.
+calibrated conservatively: on small or conversational vaults, a correct
+answer may surface under `sparse` or even `unwritten` — the verdict rates
+the geometric match, not whether the corpus contains the answer. Read hits
+before discarding them.
 
 ## Working on this repo
 
