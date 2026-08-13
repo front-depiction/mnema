@@ -193,6 +193,15 @@ method, registered by URL scheme. Vaults must share the local store's config
 warning, never silently mixed. Vaults are not transitive — a vault's own
 vaults are ignored.
 
+### Example vaults
+
+`examples/vaults/miller/` builds a starter vault from the object-capability /
+agoric research canon: a manifest of public paper URLs plus a one-command
+builder that fetches and ingests them dated by publication (no paper text
+ships in the repo — derived stores are rebuilt from sources). Once built it is
+a store like any other: mount it locally with `mnema vault add`, or share it
+with teammates by serving the directory exactly as you would your own.
+
 ## How good is it?
 
 Two layers, two answers. The **storage/currency layer** (delta fold read at

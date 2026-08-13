@@ -146,7 +146,7 @@ automatically and falls back gracefully if it dies.
 
 Resolution order: `--store PATH` flag > `MNEMA_STORE` env var > `~/.mnema`.
 Keep separate stores per scope (personal, project, team). Create one with
-`mnema init --store <path>`.
+`mnema --store <path> init`.
 
 ## Vaults: other people's memories
 
