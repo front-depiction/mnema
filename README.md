@@ -40,11 +40,13 @@ $ uv run mnema init  # creates ~/.mnema
 
 ## How agents use it
 
-The intended consumer is an agent with a shell. The contract is three verbs:
+The intended consumer is an agent with a shell. The contract is three verbs
+and a pronoun:
 
 ```console
 mnema remember "<anything worth keeping>"     # write. no key, no schema.
 mnema ask "<question>"                        # read. verdict + sources.
+mnema show <hash>                             # dereference any printed hash.
 mnema keep <hash>                             # veto a wrong displacement.
 ```
 
@@ -54,7 +56,8 @@ The loop that makes it work as long-term memory:
    memory displaces (floor-gated similarity, weight capped below 1) and prints
    what it did — the agent sees `displaced 8397fcd1 [0.83] "..."` and can
    immediately `keep 8397fcd1` if the inference was wrong. Hashes are pronouns
-   the system hands you, never names you must invent.
+   the system hands you, never names you must invent — and every printed one
+   dereferences to its full memory with `mnema show <hash>`.
 2. **Trust the verdict.** `ask` returns `settled` / `sparse` / `unwritten`
    support before any results. `unwritten` means *this memory holds nothing
    there* — the difference between an assistant that says "I don't know" and
@@ -151,11 +154,25 @@ $ mnema remember "..."                              # ALWAYS local — writes
 
 When a question spans stores, the top hit also takes one relate hop: its own
 value vector probes every *other* consulted store (never its origin), and
-`↳ related (alice 0.75): ...` lines under the first hit surface beliefs that
-connect across vaults. The number is a relatedness weight, not a support
-score — claim-to-claim cosines run hot, and these lines never carry verdict
-semantics. Follow one with `mnema ask --from <vault>` when the connection
-matters.
+`↳ related (alice 0.75) 8397fcd1: ...` lines under the first hit surface
+beliefs that connect across vaults. The number is a relatedness weight, not a
+support score — claim-to-claim cosines run hot, and these lines never carry
+verdict semantics. Follow one with `mnema show <hash>` (the full memory,
+whichever vault it lives in) or `mnema ask --from <vault>` when the
+connection matters.
+
+The hop needs no setup beyond mounting: every vault already joins every ask,
+the ranking runs over the union of all consulted stores, and the probe is
+the top hit's own stored vector rather than your question. So one query
+shows two things — how your *question* resolves across everything, and how
+your *answer* relates to everything else; the second is the browsing system.
+A stored memory is a distilled, specific claim, and claim-to-claim matching
+is the strongest retrieval geometry, so detailed one-belief-per-entry
+memories pay twice: every well-written memory is already an ideal query. The
+loop an agent runs: ask, read the answer, `mnema show` a related hash,
+`ask --from` that vault if it matters. One level deep, similarity only,
+never a verdict — and a colleague's vault participates with zero
+coordination: your top hit surfaces whatever they hold nearest to it.
 
 Serving your store is one command, because its files are append-only and its
 config immutable:

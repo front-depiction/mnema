@@ -17,7 +17,8 @@ mnema keep <hash>
   displaced (`displaced 8397fcd1 [attenuated 0.83] "..."`). Read it. If an
   inference is wrong — the displaced belief is NOT actually replaced by what
   you wrote — restore it immediately with `mnema keep 8397fcd1`. Hashes are
-  pronouns the system prints for you; never invent one.
+  pronouns the system prints for you; never invent one, and any printed hash
+  is recallable in full with `mnema show <hash>`.
 - **ask**: the verdict line comes first, in words: `settled` = the top
   result is trustworthy; `sparse` = likely in the results, read critically;
   `unwritten` = nothing matches well — nearest content is shown but must be
@@ -28,7 +29,9 @@ mnema keep <hash>
   prefer it. `↳ related (vault 0.75)` lines under the top hit are
   relatedness, not answers: they say a belief connects across vaults, their
   scale runs hot (claim-to-claim cosines), and they never carry verdict
-  semantics. If a connection matters, follow it: `mnema ask --from <vault>`.
+  semantics. If a connection matters, follow it: `mnema show <hash>` reads
+  the full memory behind the line (any vault), or `mnema ask --from <vault>`
+  re-asks in that vault alone.
 - **Answer from the hits, in your own words.** mnema never generates prose;
   you are the reader. Cite `at` timestamps when freshness matters.
 
@@ -157,6 +160,29 @@ calibrated conservatively: on small or conversational vaults, a correct
 answer may surface under `sparse` or even `unwritten` — the verdict rates
 the geometric match, not whether the corpus contains the answer. Read hits
 before discarding them.
+
+## The relate hop: your answer is the query
+
+Every mounted vault joins every ask automatically — mounting IS the linking
+step; there is no other. One ask ranks the union of all consulted stores and
+takes the true top hit wherever it lives; then that hit's own stored vector —
+not your question — probes every OTHER store, origin excluded. A single ask
+therefore shows two things: how your QUESTION resolves across everything, and
+how your ANSWER relates to everything else. The second is the browsing
+system.
+
+The hit is a stronger probe than the question. A stored memory is a
+distilled, specific claim, and claim-to-claim matching is the strongest
+geometry — "assert your hypothesis" (above), automated. Another payoff of
+one-belief-per-entry writing: every well-written memory is already an ideal
+query.
+
+The loop: ask → read the answer → follow a related hash with `mnema show
+<hash>` → `mnema ask --from <vault>` when you want more from that authority.
+Colleagues' mounted vaults participate identically — your top hit surfaces
+what THEY hold nearest to it, with zero coordination. Bounds stay bounds:
+relate weights are similarity, the hop is one level deep, and verdicts never
+apply to relate lines.
 
 ## Working on this repo
 

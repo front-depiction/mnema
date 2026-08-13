@@ -138,4 +138,8 @@ def test_cli_prints_relate_lines_under_the_first_hit(tmp_path, monkeypatch, caps
     out = capsys.readouterr().out
     relate = next(l for l in out.splitlines() if "↳ related" in l)
     assert "(alice 0.9" in relate and "miller" in relate
+    vault_h = Entry(text="authority is fractal; duplicated power erodes",
+                    topic="miller", at="2026-01-02T00:00:00Z").h
+    assert (f"{vault_h[:8]}: miller — authority is fractal; "
+            "duplicated power erodes") in relate         # hash + full snippet
     assert out.index("↳ related") < out.index("[note] miller")  # above hit 2

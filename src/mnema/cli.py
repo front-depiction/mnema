@@ -4,6 +4,7 @@
     mnema remember "text" [--topic KEY] [--slot name=value ...]
     mnema ingest --format ledger|jsonl PATH [PATH ...]
     mnema ask "question" [--top 5] [--as-of ISO] [--current] [--slot n=v ...]
+    mnema show HASH [HASH ...]
     mnema stats
     mnema merge OTHER_STORE --out NEW_STORE
 """
@@ -137,10 +138,74 @@ def cmd_ask(args) -> None:
             # cosine always shown: a relatedness weight, not a support score
             for r in ans.related:
                 body = " ".join(r.text.split())
-                label = r.topic or body[:60] + ("..." if len(body) > 60 else "")
-                snippet = (" — " + body[:70] + ("..." if len(body) > 70 else "")
-                           if r.topic else "")
-                print(f"       ↳ related ({r.source} {r.cos:.2f}): {label}{snippet}")
+                snip = body[:140] + ("..." if len(body) > 140 else "")
+                label = f"{r.topic} — {snip}" if r.topic else snip
+                print(f"       ↳ related ({r.source} {r.cos:.2f}) {r.h[:8]}: {label}")
+
+
+def cmd_show(args) -> None:
+    from . import vaults as V
+    store = Store(Path(args.store))
+
+    sources: list[tuple[str, list[Entry]]] = [("local", store.entries())]
+    for vault in V.load_vaults(store.path):
+        try:
+            mirror = V.sync_vault(store.path, vault)
+        except Exception as ex:
+            mirror = Path(store.path) / "vaults" / vault["name"]
+            if not (mirror / V.LOG).exists():
+                print(f"  ! vault '{vault['name']}' unreachable: {ex}")
+                continue
+            print(f"  ! vault '{vault['name']}' unreachable: {ex} — reading its last mirror")
+        sources.append((vault["name"], Store(mirror).entries()))
+
+    for prefix in args.hashes:
+        matches = [(origin, e, src) for origin, src in sources for e in src
+                   if e.kind not in ("keep", "retract") and e.h.startswith(prefix)]
+        if not matches:
+            raise SystemExit(f"no entry matches hash prefix '{prefix}' "
+                             f"(searched local + {len(sources) - 1} vault(s))")
+        if len(matches) > 1:
+            lines = [f"  {e.h}  [{e.kind}] {e.topic or '—'}  ({origin})"
+                     for origin, e, _ in matches]
+            raise SystemExit(f"hash prefix '{prefix}' is ambiguous — "
+                             f"{len(matches)} matches:\n" + "\n".join(lines))
+
+        origin, e, src = matches[0]
+        retracted = {x.target for x in src if x.kind == "retract" and x.target}
+        revoked = {x.target for x in src if x.kind == "keep" and x.target}
+        by_h = {x.h: x for x in src}
+
+        print(f"\n  {e.at[:19]}  [{e.kind}] {e.topic or '—'} {e.h}  ({origin})")
+        print(textwrap.fill(" ".join(e.text.split()), width=100,
+                            initial_indent="          ",
+                            subsequent_indent="          "))
+
+        if e.kind == "alias" and e.target:
+            parent = by_h.get(e.target)
+            snippet = " ".join(parent.text.split())[:80] if parent else "?"
+            print(f"          alias of {e.target}  \"{snippet}\"")
+        if e.topic:
+            same = [x for x in src
+                    if x.kind not in ("keep", "retract", "alias")
+                    and x.h not in retracted and x.topic == e.topic]
+            if same and same[-1].h != e.h:
+                print(f"          superseded by {same[-1].h} ({same[-1].at[:10]} write)")
+        if e.h not in revoked:
+            w = max((ww for x in src if x.h not in retracted
+                     for th, ww in x.displaces if th == e.h), default=0.0)
+            if w:
+                print(f"          displaced {w:.2f} by a later write")
+        for th, ww in e.displaces:
+            target = by_h.get(th)
+            snippet = " ".join(target.text.split())[:80] if target else "?"
+            print(f"          displaces {th} [{ww:.2f}]  \"{snippet}\"")
+        questions = list(e.questions)
+        questions += [x.text for x in src
+                      if x.kind == "alias" and x.target == e.h
+                      and x.text not in questions]
+        for q in questions:
+            print(f"          question: \"{q}\"")
 
 
 def cmd_log(args) -> None:
@@ -326,6 +391,12 @@ def main() -> None:
     p.add_argument("--scores", action="store_true",
                    help="show raw support and per-hit cosines (diagnostics)")
     p.set_defaults(fn=cmd_ask)
+
+    p = sub.add_parser("show", help="print the full memory behind a printed hash "
+                       "(local or any vault); model-free")
+    p.add_argument("hashes", nargs="+", metavar="HASH",
+                   help="hash prefixes printed by remember/ask/log")
+    p.set_defaults(fn=cmd_show)
 
     p = sub.add_parser("serve", help="warm-model daemon: makes ask/remember ~instant")
     p.add_argument("--model", help="model to keep warm (default: the store's model)")
