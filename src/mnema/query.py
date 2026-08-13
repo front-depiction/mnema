@@ -6,7 +6,7 @@ jurisdiction it is consulted in (see README "The mathematics"):
     resolution  is it about this?      max(cos(q,key), cos(q,value)) — dense,
                                        fused with gated lexical evidence
     currency    does it still stand?   <S k, v> normalized within the entry's
-                                       own address cluster, per store
+                                       declared supersession family, per store
     support     is anything here?      max resolution -> verdict bands
 
 Cross-pool semantics: dense cosines share one scale (configs must match) and
@@ -30,7 +30,6 @@ from .vaults import load_vaults, sync_vault
 # corpora — "sparse" honestly means "adjacent ground, no exact address").
 SUPPORT_SETTLED = 0.65
 SUPPORT_UNWRITTEN = 0.55
-CLUSTER = 0.90
 
 VAULT_MATCH_KEYS = ("model", "dim", "seed", "sigma", "d_embed", "beta")
 
@@ -97,20 +96,43 @@ def _build_pool(store: Store, st: core.FoldState, q: np.ndarray,
             res[pi] = max(res[pi], res[i])   # extra address for the same belief
     res[~mask] = -np.inf
 
-    agreement = np.clip(np.einsum("ij,ij->i", K[:n] @ st.S.T, V[:n]), 1e-6, None)
-    sim = K[:n] @ K[:n].T
-    currency = np.empty(n, np.float32)
-    for i in range(n):
-        cluster = sim[i] >= CLUSTER
-        cluster[i] = True        # zero-vector bookkeeping rows: self-cluster
-        currency[i] = agreement[i] / agreement[cluster].max()
+    # Currency competition is defined by the log's own supersession relations —
+    # same-topic groups and displacement edges — never by N^2 semantic
+    # clustering. Unrelated entries hold currency 1 by definition; the state's
+    # testimony <S k, v> is computed only for the few entries actually in a
+    # replacement relationship. Query cost: linear scans only.
+    revoked = {e.target for e in entries if e.kind == "keep" and e.target}
+    clusters: list[list[int]] = []
+    by_topic: dict[str, list[int]] = {}
+    for i, e in enumerate(entries):
+        if e.kind in ("keep", "retract", "alias") or e.h in retracted:
+            continue
+        if e.topic:
+            by_topic.setdefault(e.topic, []).append(i)
+    clusters.extend(ix for ix in by_topic.values() if len(ix) > 1)
+    for i, e in enumerate(entries):
+        if e.h in retracted:
+            continue
+        for target_h, _w in e.displaces:
+            if target_h in row_of and target_h not in revoked:
+                clusters.append([i, row_of[target_h]])
+
+    currency = np.ones(n, np.float32)
+    rows = sorted({j for cl in clusters for j in cl})
+    if rows:
+        Kr = K[rows]
+        agree = np.clip(np.einsum("ij,ij->i", Kr @ st.S.T, V[rows]), 1e-6, None)
+        a_of = dict(zip(rows, agree))
+        for cl in clusters:
+            mx = max(a_of[j] for j in cl)
+            for j in cl:
+                currency[j] = min(currency[j], np.float32(a_of[j] / mx))
 
     superseded_by = {}
     for i, e in enumerate(entries):
         if e.topic and last.get(e.topic) not in (None, i) and not as_of:
             superseded_by[i] = entries[last[e.topic]].at
 
-    revoked = {e.target for e in entries if e.kind == "keep" and e.target}
     displaced: dict[str, float] = {}
     for e in entries:
         if e.h in retracted:

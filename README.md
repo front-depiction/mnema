@@ -63,9 +63,14 @@ The loop that makes it work as long-term memory:
    (with timestamps, hashes, and displacement annotations), not generated
    summaries. The agent does its own reading; the log stays the authority.
 
-Because appends are O(1) and the state is constant-size, this loop never slows
-down, never needs reindexing, and never needs pruning — a memory used for
-years behaves like one used for a day.
+Appends are O(1) forever and the folded state is constant-size — but honesty
+about the read side: the log and the per-memory vectors grow with history,
+and `ask` is a **linear scan** over them (no index to maintain, and no
+quadratic terms anywhere — currency is evaluated only on the few entries in
+a declared supersession relationship). Linear scan is practical to roughly
+10^5 memories; beyond that, the architecture's scale path is candidate-set
+retrieval (ANN/lexical prefilter, then fold-currency inside the candidates)
+— the fold's semantics are unchanged by it.
 
 ## Pointing at different memories
 
@@ -184,7 +189,9 @@ factors have authority over — currency turns the supersession pairs from
 1/2 to 2/2, the gated lexical view turns polysemy from 3/6 to 5/6 and a
 1,248-entry corpus from 11 to 13/16 — and each factor is near-inert outside
 its jurisdiction. `benchmarks/` holds the harness; probes are corpus-local
-and never committed.
+and never committed. Caveat these numbers honestly: the probe sets are
+small and corpus-specific — treat the verdict thresholds as per-corpus
+calibration targets, not universal constants.
 
 ## Performance
 
@@ -365,8 +372,11 @@ beliefs count — displaced and superseded history refunds its space. Raise
 - **Not generative.** It routes to real memories; it never writes prose.
 - **Not enumeration.** The state answers similarity-shaped questions; "list
   everything" reads the log.
-- **Not a vector database.** No index to build, no collection to grow, no
-  ranking heuristics — one matrix and a log.
+- **Not a vector database, but honest about the overlap.** Reads do scan
+  stored vectors (linearly, index-free); what a vector DB cannot give you is
+  the folded state — supersession as arithmetic, currency, time travel,
+  exact undo, associative merge. The state is what stays constant; the log
+  grows, as truth should.
 
 ## The laws are tested
 
