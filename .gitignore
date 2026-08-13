@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.venv/
+dist/
+*.egg-info/
+.pytest_cache/
+# store artifacts (never commit a memory)
+*.f16
+state.npz
+benchmarks/probes_local*.py

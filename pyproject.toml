@@ -1,0 +1,28 @@
+[project]
+name = "mnema"
+version = "0.2.0"
+description = "Constant-size semantic memory: fold any append-only knowledge log into one queryable matrix where supersession is subtraction"
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+license = { text = "MIT" }
+authors = [{ name = "Florien Lazaro" }]
+dependencies = [
+    "numpy>=1.26",
+    "sentence-transformers>=3.0",
+]
+
+[project.scripts]
+mnema = "mnema.cli:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mnema"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
