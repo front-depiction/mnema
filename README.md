@@ -232,7 +232,20 @@ A translator is any function `path -> [entries]`. Built-ins:
 ```console
 $ mnema ingest --format jsonl facts.jsonl        # {"text": ..., "at"?: ..., "topic"?: ...}
 $ mnema ingest --format ledger "logs/**/*.jsonl" # tagged event ledgers
+$ mnema ingest --format paper --at 2006-05-15T00:00:00Z thesis.pdf
 ```
+
+`paper` ingests whole documents: non-markdown formats (PDF, DOCX, EPUB, ...)
+convert through the optional anydoc converter — `pip install "mnema[paper]"`
+if it's missing — then sections split at headings and paragraphs pack into
+~300-word chunks so every chunk fits the 350-word dense-index horizon
+(measured on a 207-page dissertation: heading-only sectioning left 45% of
+sections past the horizon; packing leaves 9.7%, all single unbreakable
+paragraphs). Chunk topics extend the section slot (`path#slug`,
+`path#slug/2`, ...) — disjoint addresses within one paper, stable across
+re-ingests — and pure-navigation sections (contents, lists of tables/figures,
+index) are dropped. `--at` stamps one ISO timestamp on every entry: archival
+documents should carry their publication date, not the file's mtime.
 
 **Or skip Python translators entirely and pipe:** `ingest` reads JSONL from
 stdin with `-`, so a translator is any shell pipeline that emits

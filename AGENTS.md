@@ -106,6 +106,15 @@ was folded. Discipline for every `remember`:
 8. **History before life.** Bulk-ingest archives before daily writes (the
    fold runs in log order), and check `mnema stats` occasionally — act on
    headroom warnings before recall degrades.
+9. **One paper per ingest, dated by publication.** `mnema ingest --format
+   paper --at <publication ISO>` keeps the fold's time axis honest — archival
+   documents must not carry file mtimes. Never `--infer` within a single
+   paper: its sections are disjoint claims, not supersessions of each other.
+   Across papers in one store, a later paper may legitimately supersede an
+   earlier one — exactly what topic-free cross-paper `--infer` or explicit
+   curation is for. Caveat: PDFs from old TeX toolchains can carry broken
+   ligatures ("conflnement" for "confinement") — dense matching tolerates
+   them; exact-term search does not.
 
 ## Speed
 
