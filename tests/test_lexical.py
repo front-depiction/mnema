@@ -96,3 +96,16 @@ def test_forgetting_parent_silences_its_alias(tmp_path):
     s.forget([parent.h])
     ans = ask(s, "what is the codeword?", embedder=FakeEmbedder(), vaults="local")
     assert all(h.topic != "sec/codeword" for h in ans.hits)
+
+
+def test_topic_collision_warns_on_unrelated_overwrite(tmp_path, capsys):
+    s = make_store(tmp_path, "coll")
+    s.remember_inferred(Entry(text="lint with tsgo using the fast preset",
+                              topic="linting", at="2026-01-01T00:00:00Z"),
+                        FakeEmbedder())
+    s.remember_inferred(Entry(text="quarterly budget review happens in march",
+                              topic="linting", at="2026-02-01T00:00:00Z"),
+                        FakeEmbedder())
+    out = capsys.readouterr().out
+    assert "UNRELATED content" in out          # sibling-erasure detected
+    assert "sibling topics" in out

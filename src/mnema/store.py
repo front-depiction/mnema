@@ -315,6 +315,29 @@ class Store:
         if entry.h in {e.h for e in entries}:
             return False, []
 
+        if entry.topic:
+            # topic collision check: a legitimate version is semantically near
+            # what it replaces; low similarity means a SIBLING is about to be
+            # erased by accident (topic used as a folder, not a slot).
+            last = self.latest_by_topic()
+            if entry.topic in last:
+                prior_i = last[entry.topic]
+                value_lift0, _ = self._lift_ops()
+                v_new = value_lift0(embedder.passages([entry.text]))[0]
+                v_old = self.vectors(VEC_V)[prior_i].astype(np.float32)
+                cos = float(v_old @ v_new)
+                prior = entries[prior_i]
+                if cos < 0.55:
+                    print(f"  ! topic '{entry.topic}' held UNRELATED content "
+                          f"(cos {cos:.2f}) — this write erases {prior.h[:8]} "
+                          f"\"{' '.join(prior.text.split())[:60]}\". If these should "
+                          f"coexist, use sibling topics ({entry.topic}/a, "
+                          f"{entry.topic}/b); undo with: mnema forget <this write>",
+                          flush=True)
+                else:
+                    print(f"  supersedes {prior.h[:8]} at {entry.topic} "
+                          f"(cos {cos:.2f})", flush=True)
+
         displaced: list[tuple[Entry, float]] = []
         if not entry.topic and entries:
             value_lift, _ = self._lift_ops()
