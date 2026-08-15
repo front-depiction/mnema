@@ -27,7 +27,9 @@ unwritten — nothing matches this well; nearest content shown, verify before tr
 No key was ever given. The second memory *found* the first one — because it
 landed on it in meaning space — and attenuated it. Ask about deploys and you
 get the current truth; ask about something never remembered and the memory
-**says so** instead of guessing.
+**says so** instead of guessing. And with other memories mounted, every
+answer arrives already carrying its relations across all of them — [the
+system browses for you](#the-system-browses-for-you).
 
 ## Install
 
@@ -133,6 +135,14 @@ question is never "is this related?" but "does this replace what's there?"
 Siblings get sibling topics; category questions aggregate them through
 content matching automatically.
 
+The default is bare prose. Keying opts a belief *out* of the self-healing
+physics — equality supersedes a slot, nothing else does — so two slots
+holding one belief under different names drift apart, each protected by
+its own key. Reach for a topic only when the name comes from a machine
+(translator slots like `doc.md#heading`) or the memory is a true
+current-value register rewritten wholesale under a name you can recall
+exactly. Minting topics to categorize rebuilds the wiki you were escaping.
+
 ## Vaults: read many, write your own
 
 A vault is someone else's memory at a known address — a teammate's store on
@@ -160,27 +170,14 @@ $ mnema remember "..."                              # ALWAYS local — writes
                                                     # cannot reach a vault
 ```
 
-When a question spans stores, the top hit also takes one relate hop: its own
-value vector probes every *other* consulted store (never its origin), and
-`<related h="8397fcd1" vault="alice" cos="0.75">` blocks inside the first hit
-surface beliefs that connect across vaults. The `cos` is a relatedness
-weight, not a support score — claim-to-claim cosines run hot, and these
-blocks never carry verdict semantics. Follow one with `mnema show <hash>` (the full memory,
-whichever vault it lives in) or `mnema ask --from <vault>` when the
-connection matters.
-
-The hop needs no setup beyond mounting: every vault already joins every ask,
-the ranking runs over the union of all consulted stores, and the probe is
-the top hit's own stored vector rather than your question. So one query
-shows two things — how your *question* resolves across everything, and how
-your *answer* relates to everything else; the second is the browsing system.
-A stored memory is a distilled, specific claim, and claim-to-claim matching
-is the strongest retrieval geometry, so detailed one-belief-per-entry
-memories pay twice: every well-written memory is already an ideal query. The
-loop an agent runs: ask, read the answer, `mnema show` a related hash,
-`ask --from` that vault if it matters. One level deep, similarity only,
-never a verdict — and a colleague's vault participates with zero
-coordination: your top hit surfaces whatever they hold nearest to it.
+When a question spans stores, the top hit also takes one relate hop —
+`<related h="8397fcd1" vault="alice" cos="0.75">` blocks inside the first
+hit surface beliefs that connect across vaults (see **The system browses
+for you**, below). The `cos` is a relatedness weight, not a support score —
+claim-to-claim cosines run hot, and these blocks never carry verdict
+semantics. Follow one with `mnema show <hash>` (the full memory, whichever
+vault it lives in) or `mnema ask --from <vault>` when the connection
+matters.
 
 Serving your store is one command, because its files are append-only and its
 config immutable:
@@ -207,36 +204,38 @@ ships in the repo — derived stores are rebuilt from sources). Once built it is
 a store like any other: mount it locally with `mnema vault add`, or share it
 with teammates by serving the directory exactly as you would your own.
 
-## How good is it?
+## The system browses for you
 
-Two layers, two answers. The **storage/currency layer** (delta fold read at
-exact addresses) benchmarks at ~0.97 recall@1 with zero stale-wins within
-capacity. The **question-resolution layer** (your English → an address) was
-measured end-to-end on a hard probe set — 20 paraphrased questions against a
-narrow 42-entry doctrine corpus — and the finding is that **the verdict
-predicts its own accuracy**:
+Retrieval research keeps arriving at the same conclusion: the best query is
+not a question but a **detailed claim that already carries its assumptions**.
+Nobody writes queries like that. But your memories — distilled,
+one-belief-per-entry — already *are* queries like that. So every ask
+exploits it automatically, in two hops:
 
-| verdict | share of probes | top-1 | top-3 |
-|---|---|---|---|
-| settled | 70% | **100%** | 100% |
-| sparse | 30% | 67% | 100% |
+```
+your question ──▶ most relevant answer across ALL vaults    (ranked over the union)
+                        │
+                        ▼
+              the answer itself — a detailed, assumption-laden
+              claim — becomes the query against every OTHER vault
+                        │
+                        ▼
+              <related> beliefs arrive attached to your answer
+```
 
-Read it as a contract: `settled` answers are trustworthy; `sparse` means the
-right entry is probably in the list but read critically; `unwritten` means
-stop. Every hard miss in the benchmark was pre-announced by its own verdict.
-Queries are always plain language — addresses are resolved internally and
-never user-supplied.
+You are still served the most relevant answer to your question — it just
+arrives carrying the most relevant things *about it* from every other
+memory you can see. Ask an architecture question: the top hit is your own
+doctrine note, and nested inside it, the sections of an entire mounted
+research canon nearest to that belief. Ask about the research: the paper's
+passage comes back carrying *your* architecture that descends from it. The
+hop is direction-free — whoever answers, everyone else annotates.
 
-The factored composition was established by ablation across four probe
-classes (paraphrase resolution on two corpora, cross-vault polysemy,
-supersession pairs): the full product wins or ties every class that its
-factors have authority over — currency turns the supersession pairs from
-1/2 to 2/2, the gated lexical view turns polysemy from 3/6 to 5/6 and a
-1,248-entry corpus from 11 to 13/16 — and each factor is near-inert outside
-its jurisdiction. `benchmarks/` holds the harness; probes are corpus-local
-and never committed. Caveat these numbers honestly: the probe sets are
-small and corpus-specific — treat the verdict thresholds as per-corpus
-calibration targets, not universal constants.
+Doing the best thing costs nothing: no linking step, no relation schema, no
+"see also" fields to maintain. Mounting a vault is the entire setup; the
+rest falls out of geometry, and it *improves* with the same discipline that
+improves everything else — a well-written memory is already an ideal probe.
+Bounds stay bounds: one hop deep, similarity only, never a verdict.
 
 ## Performance
 
@@ -413,6 +412,7 @@ by the full composition.
 | Knows what it doesn't know | nearest-address support: settled / sparse / unwritten |
 | Inference is safe | displacement weights capped below 1 — invertible, logged, `keep`-revocable |
 | Time travel | `ask --as-of <ISO>` answers from the state as of any moment |
+| Browses for you | the answer re-queries every other vault as a detailed claim — relations arrive attached, zero setup |
 | Merge without re-embedding | interleave logs, reuse every vector, refold once (pure GEMMs, seconds) — exact by associativity |
 | Capacity self-awareness | `mnema stats` estimates live beliefs vs D and warns before quality degrades |
 | Local and private | embeddings computed on-device; nothing leaves the machine |

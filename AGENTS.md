@@ -104,15 +104,28 @@ was folded. Discipline for every `remember`:
 2. **Distill, don't dump.** Remember the conclusion ("we chose X over Y
    because Z"), never the transcript that produced it. Distilled beliefs also
    make displacement inference sharp.
-3. **A topic is a slot, not a folder.** Same exact topic = "this REPLACES
-   what's there" — total erasure by declaration (a warning fires if the
-   replaced content is semantically unrelated: that's a sibling, not a
-   version). Co-valid facts get sibling topics (`linting/tsgo`,
-   `linting/tslint`) — prefixes are convention only, and category questions
-   find all siblings through content matching anyway.
-4. **Topic anything with a lifecycle.** Will a future write *replace* this
-   (a policy, an owner, a schedule, a status)? → `--topic name` for exact
-   supersession. One-off facts and observations stay keyless.
+3. **Default keyless. A topic is an exception you justify, never a filing
+   habit.** Prose is the medium; retrieval is the category system — many
+   beliefs about one subject coexist as keyless entries, each findable by
+   content, contradictions eroding the older gradually with no name to
+   remember. A topic is justified only when the name comes from a machine
+   (translator slots like `doc.md#heading`, where the source IS the
+   taxonomy) or the memory is a true current-value register — a fact you
+   will rewrite wholesale (an owner, a status, a standing ruling) under a
+   name you can recall exactly. Never mint a topic to categorize.
+4. **Keying opts out of self-healing — know the failure you're buying.**
+   A topic supersedes by exact string equality ONLY, and topiced writes
+   infer nothing: two topics holding the same belief under different names
+   DRIFT — updates land on one, the stale twin keeps testifying at full
+   currency, protected by the very slot meant to keep it current. Keyless
+   twins converge (the physics erodes the older); keyed twins never do. And
+   equality demands exact recall: a near-miss name (`lint-rules` vs
+   `linting`) silently creates a sibling, no guard fires. A store full of
+   minted topics is a wiki again — stale pages, maintenance debt, square
+   one. Same exact topic = total erasure by declaration (the collision
+   guard warns when replaced content looks like a sibling, not a version);
+   prefixes are convention only — category questions find things through
+   content, never through names.
 5. **Scope stores by register.** Personal preferences, project rulings, and
    chat digests belong in separate stores (`MNEMA_STORE` per context) —
    mixed-genre corpora blur verdicts and misfire displacement. Recombine at
