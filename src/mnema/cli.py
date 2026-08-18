@@ -75,6 +75,17 @@ def _attenuation_reading(w: float) -> str:
     return "borderline — same neighborhood, may be a sibling not a version"
 
 
+def cmd_question(args) -> None:
+    """Attach questions an existing memory answers — extra addresses for it."""
+    store = Store(Path(args.store))
+    target, added = store.add_questions(args.hash, args.questions)
+    if target is None:
+        raise SystemExit(f"no unique live memory matches hash prefix '{args.hash}'")
+    snippet = " ".join(target.text.split())[:80]
+    print(f"{added} question{'s' if added != 1 else ''} attached to {target.h[:8]}"
+          f"  \"{snippet}\"" + ("" if added else "  (all already attached)"))
+
+
 def cmd_keep(args) -> None:
     store = Store(Path(args.store))
     restored = store.keep(args.hash)
@@ -491,6 +502,12 @@ def main() -> None:
     p.add_argument("--question", action="append",
                    help="optional: a question this memory answers (extra address)")
     p.set_defaults(fn=cmd_remember)
+
+    p = sub.add_parser("question", help="attach questions an existing memory answers "
+                       "(extra addresses; better recall for that memory)")
+    p.add_argument("hash", help="hash prefix of the memory")
+    p.add_argument("questions", nargs="+", help="one or more questions it answers")
+    p.set_defaults(fn=cmd_question)
 
     p = sub.add_parser("keep", help="revoke an inferred displacement; restores the entry")
     p.add_argument("hash", help="hash prefix printed by remember/ask")

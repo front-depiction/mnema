@@ -76,7 +76,9 @@ cleanly:
 
 Add `questions` to a memory only when you know phrasings its text lacks —
 measured: question-aliases help phrasing-gap corpora, and cost a little on
-curated doc corpora whose misses are sibling co-answers.
+curated doc corpora whose misses are sibling co-answers. `--question` at
+write time, or `mnema question <hash> "…"` on any existing memory
+(idempotent) — curation never requires re-remembering.
 
 ## One vault or many?
 

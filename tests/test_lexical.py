@@ -143,3 +143,19 @@ def test_forgotten_displacement_target_cannot_depress_live_currency(tmp_path):
             if e.kind == "note" and e.h != target.h]
     for i in live:
         assert pool.currency[i] == 1.0     # no live rival -> full currency
+
+
+def test_questions_can_be_attached_to_an_existing_memory(tmp_path):
+    s = make_store(tmp_path, "qattach")
+    s.append([Entry(text="the codeword is albatross", topic="sec/codeword",
+                    at="2026-01-01T00:00:00Z")])
+    s.catch_up(FakeEmbedder(), quiet=True)
+    parent = s.entries()[0]
+    target, added = s.add_questions(parent.h[:8], ["what is the codeword?"], FakeEmbedder())
+    assert target.h == parent.h and added == 1
+    ans = ask(s, "what is the codeword?", embedder=FakeEmbedder(), vaults="local")
+    assert ans.hits[0].topic == "sec/codeword"           # the new address resolves
+    assert all(h.kind != "alias" for h in ans.hits)
+    _, again = s.add_questions(parent.h[:8], ["what is the codeword?"], FakeEmbedder())
+    assert again == 0                                     # idempotent per (target, text)
+    assert s.add_questions("zzzz", ["x"], FakeEmbedder()) == (None, 0)

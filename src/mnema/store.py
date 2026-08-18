@@ -489,6 +489,27 @@ class Store:
         self.catch_up(embedder, quiet=True)
         return added, n_disp
 
+    def add_questions(self, hash_prefix: str, questions: list[str],
+                      embedder: Embedder | None = None) -> tuple[Entry | None, int]:
+        """Attach question-shaped addresses to an EXISTING memory: one alias
+        entry per new question, targeting it. Idempotent per (target, text).
+        Returns (target entry, aliases added); (None, 0) if no unique match."""
+        entries = self.entries()
+        retracted = self.retracted_hashes(entries)
+        live = [e for e in entries if e.kind not in ("keep", "retract", "alias")
+                and e.h not in retracted]
+        matches = [e for e in live if e.h.startswith(hash_prefix)]
+        if len(matches) != 1:
+            return None, 0
+        target = matches[0]
+        have = {e.text for e in entries if e.kind == "alias" and e.target == target.h}
+        fresh = [q for q in dict.fromkeys(questions) if q not in have]
+        if not fresh:
+            return target, 0
+        self.append([Entry(text=q, kind="alias", target=target.h) for q in fresh])
+        self.catch_up(embedder, quiet=True)
+        return target, len(fresh)
+
     def keep(self, hash_prefix: str, embedder: Embedder | None = None) -> Entry | None:
         """Revoke every inferred displacement of the entry matching the hash
         prefix, restoring it to full strength (exact: forces a refold)."""

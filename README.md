@@ -68,6 +68,7 @@ mnema remember "<anything worth keeping>"     # write. no key, no schema.
 mnema ask "<question>"                        # read. verdict + sources.
 mnema show <hash>                             # dereference any printed hash.
 mnema keep <hash>                             # veto a wrong displacement.
+mnema question <hash> "…"                     # attach a question a memory answers.
 ```
 
 The loop that makes it work as long-term memory:
