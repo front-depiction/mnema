@@ -27,9 +27,12 @@ mnema keep <hash>
   `unwritten` = nothing matches well — nearest content is shown but must be
   verified before trusting (on conversational registers a true answer can
   still surface under an `unwritten` verdict; the verdict rates the MATCH,
-  never the corpus). Raw numbers are diagnostics behind `--scores`. A
-  `navigate:` line follows with the moves that keep you going. Hits are real
-  remembered entries, newest truth first, printed as blocks:
+  never the corpus). Raw numbers are diagnostics behind `--scores`. Line two
+  states the output's exact line count — read ALL of it: memories are small
+  and the answer is often in a later hit, so truncating with `head` cuts
+  relevant ones. A `navigate:` line follows with the moves that keep you
+  going. Hits are real remembered entries, newest truth first, printed as
+  blocks:
 
   ```
   <hit h="2d2c364f" at="2026-08-13" kind="note" topic="ops/deploy-freeze">

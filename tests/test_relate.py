@@ -5,6 +5,8 @@ store, ranked hub-penalized so summaries don't crowd out sharp connections."""
 
 import argparse
 
+import re
+
 import numpy as np
 import pytest
 
@@ -392,8 +394,10 @@ def test_cli_navigate_line_raw_attributes_and_three_related(
     out = _run_cli_ask(local, emb, monkeypatch, capsys,
                        "what deletes duplicates?")
     lines = out.splitlines()
-    assert lines[1].startswith("navigate: ")             # present and second
-    assert "mnema show <hash>" in lines[1] and "--except <vault>" in lines[1]
+    m = re.match(r"output: (\d+) lines — ", lines[1])   # count leads, second line
+    assert m and int(m.group(1)) == len(lines)          # and it is exact
+    assert lines[2].startswith("navigate: ")             # navigate is third
+    assert "mnema show <hash>" in lines[2] and "--except <vault>" in lines[2]
     assert f'topic="{weird}"' in out                     # raw, never escaped
     assert not any(esc in out for esc in ("&amp;", "&lt;", "&gt;", "&quot;"))
     assert out.count("<related ") == 3                   # three clear the floor

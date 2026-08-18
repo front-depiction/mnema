@@ -135,18 +135,20 @@ def cmd_ask(args) -> None:
         "unwritten": "unwritten — nothing matches this well; nearest content "
                      "shown, verify before trusting",
     }
+    out: list[str] = []
     if args.scores:
         from .query import SUPPORT_SETTLED, SUPPORT_UNWRITTEN
         band = {"settled": f"≥{SUPPORT_SETTLED}", "unwritten": f"<{SUPPORT_UNWRITTEN}",
                 "sparse": f"{SUPPORT_UNWRITTEN}–{SUPPORT_SETTLED}"}[ans.verdict]
-        print(f"support {ans.support} (band {band}){when}")
-    print(f"{VERDICT_LINE[ans.verdict]}{when if not args.scores else ''}")
-    print("navigate: <related/> lines are your answer's connections across every "
-          "vault — mnema show <hash> opens any memory in full · "
-          "mnema ask --from <vault> \"…\" scopes one · --except <vault> drops one · "
-          "refine the question to keep moving")
+        out.append(f"support {ans.support} (band {band}){when}")
+    out.append(f"{VERDICT_LINE[ans.verdict]}{when if not args.scores else ''}")
+    count_at = len(out)                       # the line-count line goes here
+    out.append("navigate: <related/> lines are your answer's connections across every "
+               "vault — mnema show <hash> opens any memory in full · "
+               "mnema ask --from <vault> \"…\" scopes one · --except <vault> drops one · "
+               "refine the question to keep moving")
     for w in ans.warnings:
-        print(f"! {w}")
+        out.append(f"! {w}")
     # XML-shaped for readability, deliberately not parseable XML: attributes
     # are metadata, bodies are raw prose — never escaped.
     for rank, h in enumerate(ans.hits):
@@ -161,9 +163,10 @@ def cmd_ask(args) -> None:
             attrs.append(f'displaced="{h.displaced:.2f}"')
         if args.scores:
             attrs.append(f'score="{h.score:.3f}"')
-        print(f"\n<hit {' '.join(attrs)}>")
-        print(textwrap.fill(" ".join(h.text.split()), width=100,
-                            initial_indent="  ", subsequent_indent="  "))
+        out.append("")
+        out.append(f"<hit {' '.join(attrs)}>")
+        out.append(textwrap.fill(" ".join(h.text.split()), width=100,
+                                 initial_indent="  ", subsequent_indent="  "))
         # cos always shown: a relatedness weight, not a support score
         for r in (ans.related_by_hit[rank] if rank < len(ans.related_by_hit) else []):
             rattrs = [f'h="{r.h[:8]}"', f'vault="{r.source}"',
@@ -171,8 +174,15 @@ def cmd_ask(args) -> None:
             if args.scores:
                 rattrs.append(f'score="{r.score:.3f}"')
             rattrs.append(f'gloss="{_gloss(r)}"')
-            print(f"  <related {' '.join(rattrs)}/>")
-        print("</hit>")
+            out.append(f"  <related {' '.join(rattrs)}/>")
+        out.append("</hit>")
+    # Rendered to a buffer first so the true total can lead: an agent about to
+    # truncate sees the whole size before it cuts.
+    total = sum(line.count("\n") + 1 for line in out) + 1
+    out.insert(count_at, f"output: {total} lines — read all of them: memories are "
+                         f"small and the answer is often in a later hit; truncating "
+                         f"cuts relevant ones")
+    print("\n".join(out))
 
 
 def _gloss(r) -> str:

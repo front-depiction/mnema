@@ -20,6 +20,7 @@ read each displaced memory: does the new one actually REPLACE it? if not, restor
 
 $ mnema ask "can we deploy on friday?"
 settled — a strong match exists; the top result is trustworthy
+output: 5 lines — read all of them: memories are small and the answer is often in a later hit; truncating cuts relevant ones
 navigate: <related/> lines are your answer's connections across every vault — mnema show <hash> opens any memory in full · …
 
 <hit h="2d2c364f" at="2026-08-13" kind="note" topic="ops/deploy-freeze">
