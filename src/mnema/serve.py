@@ -82,12 +82,33 @@ class EmbedServer(socketserver.ThreadingUnixStreamServer):
         self.lock = threading.Lock()
 
 
+def pid_path(sock: Path) -> Path:
+    return sock.with_suffix(".pid")
+
+
+def running_daemons() -> list[tuple[Path, int]]:
+    """(socket, pid) of every daemon whose pid file names a live process."""
+    root = socket_path("probe").parent
+    out = []
+    for pid_file in root.glob("*.pid"):
+        try:
+            pid = int(pid_file.read_text().strip())
+            os.kill(pid, 0)
+        except (ValueError, OSError):
+            pid_file.unlink(missing_ok=True)
+            continue
+        out.append((pid_file.with_suffix(".sock"), pid))
+    return out
+
+
 def serve(embedder, path: Path | None = None) -> None:
     path = path or socket_path(embedder.model_name)
     _ = embedder.model                          # load weights before accepting
     server = EmbedServer(path, embedder)
+    pid_path(path).write_text(str(os.getpid()))
     print(f"mnema daemon: {embedder.model_name} warm on {path}", flush=True)
     try:
         server.serve_forever()
     finally:
         path.unlink(missing_ok=True)
+        pid_path(path).unlink(missing_ok=True)

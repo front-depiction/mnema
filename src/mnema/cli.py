@@ -366,6 +366,53 @@ def cmd_serve(args) -> None:
     serve(Embedder(model, direct=True))
 
 
+def cmd_update(args) -> None:
+    """Pull the source this CLI runs from and bounce the warm daemon."""
+    import signal
+    import subprocess
+    import sys
+    import time
+    from . import serve as S
+    root = Path(__file__).resolve().parents[2]
+    if not (root / ".git").is_dir():
+        raise SystemExit(
+            f"this mnema is not running from a git checkout ({root}) — reinstall from "
+            f"source to make updates one command:\n"
+            f"  git clone https://github.com/front-depiction/mnema ~/mnema\n"
+            f"  uv tool install --force --editable ~/mnema")
+    git = lambda *a: subprocess.run(["git", "-C", str(root), *a], check=True,
+                                    capture_output=True, text=True).stdout.strip()
+    before = git("rev-parse", "HEAD")
+    print(f"pulling {root} ({before[:8]})", flush=True)
+    pulled = subprocess.run(["git", "-C", str(root), "pull", "--ff-only"],
+                            capture_output=True, text=True)
+    if pulled.returncode != 0:
+        raise SystemExit(f"git pull failed:\n{pulled.stderr.strip()}\n"
+                         f"resolve it in {root}, then run mnema update again")
+    after = git("rev-parse", "HEAD")
+    if after == before:
+        print(f"already up to date ({after[:8]})")
+    else:
+        n = git("rev-list", "--count", f"{before}..{after}")
+        print(f"updated {before[:8]} → {after[:8]} ({n} commits)")
+        for line in git("log", "--oneline", f"{before}..{after}").splitlines()[:12]:
+            print(f"  {line}")
+        changed = git("diff", "--name-only", before, after).splitlines()
+        if "pyproject.toml" in changed:
+            print("  ! dependencies may have changed — reinstall once:\n"
+                  f"    uv tool install --force --editable {root}")
+    daemons = S.running_daemons()
+    for sock, pid in daemons:
+        os.kill(pid, signal.SIGTERM)
+        print(f"stopped warm daemon (pid {pid}) — it pinned the old code")
+    if daemons:
+        time.sleep(1)
+        subprocess.Popen([sys.executable, "-m", "mnema.cli", "serve"],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         start_new_session=True)
+        print("restarted warm daemon on the new code")
+
+
 def cmd_vault(args) -> None:
     from . import vaults as V
     store = Store(Path(args.store))
@@ -505,6 +552,9 @@ def main() -> None:
     p.add_argument("--from", dest="from_vault", metavar="VAULT",
                    help="list a named vault instead of the local store")
     p.set_defaults(fn=cmd_topics)
+
+    p = sub.add_parser("update", help="pull the latest source and restart the warm daemon")
+    p.set_defaults(fn=cmd_update)
 
     p = sub.add_parser("vault", help="named read-only memories that join your queries")
     p.add_argument("action", choices=["add", "list", "remove"])

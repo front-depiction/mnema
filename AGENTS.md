@@ -160,7 +160,9 @@ was folded. Discipline for every `remember`:
 
 If `ask`/`remember` feel slow (~10s), start the warm-model daemon once:
 `mnema serve &` — every subsequent command is ~1s. The CLI finds it
-automatically and falls back gracefully if it dies.
+automatically and falls back gracefully if it dies. Update with `mnema
+update`: it pulls the source this CLI runs from and restarts the daemon
+(a running daemon pins the code it was started with).
 
 ## Which memory you're talking to
 

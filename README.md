@@ -44,10 +44,19 @@ Requires Python 3.11/3.12. The embedding model (~1.3 GB, downloaded once) runs
 locally — Apple Silicon GPU, CUDA, or CPU. Nothing ever leaves your machine.
 
 ```console
-$ git clone <this repo> && cd mnema
-$ uv sync            # or: pip install -e .
-$ uv run mnema init  # creates ~/.mnema
+$ git clone https://github.com/front-depiction/mnema ~/mnema
+$ uv tool install --editable ~/mnema --with firecrawl-anydoc   # `mnema` on PATH, from anywhere
+$ mnema init                                                    # creates ~/.mnema
+$ mnema serve &                                                 # optional: warm daemon, ~1s asks
 ```
+
+Editable means the command runs straight from the clone, so updating is
+`mnema update` — it pulls the checkout it runs from, lists what landed,
+warns if dependencies changed (then one `uv tool install --force --editable
+~/mnema`), and restarts the warm daemon, which would otherwise keep serving
+the old code. `--with firecrawl-anydoc` adds the PDF/DOCX converter the
+`paper` ingest format needs; drop it if you only ingest text. Developing on
+the repo itself: `uv sync --extra dev` and `uv run pytest`.
 
 ## How agents use it
 
