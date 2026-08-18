@@ -54,10 +54,25 @@ def cmd_remember(args) -> None:
         print("  ! long memory: content past ~350 words never reaches the index "
               "— split into separate beliefs for full retrievability")
     for old, w in displaced:
-        snippet = " ".join(old.text.split())[:80]
-        print(f"  displaced {old.h[:8]}  [attenuated {w:.2f}]  \"{snippet}\"")
+        topic = f' topic="{old.topic}"' if old.topic else ""
+        print(f'\n<displaced h="{old.h[:8]}" at="{old.at[:10]}"{topic} '
+              f'attenuated="{w:.2f}" reading="{_attenuation_reading(w)}">')
+        print(textwrap.fill(" ".join(old.text.split()), width=100,
+                            initial_indent="  ", subsequent_indent="  "))
+        print("</displaced>")
     if displaced:
-        print(f"  (wrong? restore with: mnema keep <hash>)")
+        print("\nread each displaced memory: does the new one actually REPLACE it? "
+              "if not, restore it: mnema keep <hash>")
+
+
+def _attenuation_reading(w: float) -> str:
+    """The weight in words: how directly the new memory contradicts the old
+    (cosine at write, floor INFER_FLOOR, cap INFER_CAP)."""
+    if w >= 0.88:
+        return "near-restatement — almost certainly the same belief, updated"
+    if w >= 0.80:
+        return "strong overlap — likely a replacement, verify"
+    return "borderline — same neighborhood, may be a sibling not a version"
 
 
 def cmd_keep(args) -> None:
@@ -107,8 +122,12 @@ def cmd_ask(args) -> None:
     from .query import ask
     store = Store(Path(args.store))
     scope = "local" if args.local else (args.from_vault or "all")
+    excluded = tuple(getattr(args, "except_vaults", None) or ())
+    if excluded and args.from_vault:
+        raise SystemExit("--from and --except together: pick one")
     ans = ask(store, args.question, top=args.top, as_of=args.as_of,
-              current_only=args.current, slots=_slots(args.slot), vaults=scope)
+              current_only=args.current, slots=_slots(args.slot), vaults=scope,
+              exclude=excluded)
     when = f" as of {args.as_of}" if args.as_of else ""
     VERDICT_LINE = {
         "settled": "settled — a strong match exists; the top result is trustworthy",
@@ -122,8 +141,9 @@ def cmd_ask(args) -> None:
                 "sparse": f"{SUPPORT_UNWRITTEN}–{SUPPORT_SETTLED}"}[ans.verdict]
         print(f"support {ans.support} (band {band}){when}")
     print(f"{VERDICT_LINE[ans.verdict]}{when if not args.scores else ''}")
-    print("navigate: mnema show <hash> opens any memory in full · "
-          "mnema ask --from <vault> \"...\" scopes a vault · "
+    print("navigate: <related/> lines are your answer's connections across every "
+          "vault — mnema show <hash> opens any memory in full · "
+          "mnema ask --from <vault> \"…\" scopes one · --except <vault> drops one · "
           "refine the question to keep moving")
     for w in ans.warnings:
         print(f"! {w}")
@@ -144,20 +164,25 @@ def cmd_ask(args) -> None:
         print(f"\n<hit {' '.join(attrs)}>")
         print(textwrap.fill(" ".join(h.text.split()), width=100,
                             initial_indent="  ", subsequent_indent="  "))
-        if rank == 0:
-            # cos always shown: a relatedness weight, not a support score
-            for r in ans.related:
-                rattrs = [f'h="{r.h[:8]}"', f'vault="{r.source}"',
-                          f'cos="{r.cos:.2f}"']
-                if r.topic:
-                    rattrs.append(f'topic="{r.topic}"')
-                body = " ".join(r.text.split())
-                snip = body[:280] + ("..." if len(body) > 280 else "")
-                print(f"  <related {' '.join(rattrs)}>")
-                print(textwrap.fill(snip, width=100, initial_indent="    ",
-                                    subsequent_indent="    "))
-                print("  </related>")
+        # cos always shown: a relatedness weight, not a support score
+        for r in (ans.related_by_hit[rank] if rank < len(ans.related_by_hit) else []):
+            rattrs = [f'h="{r.h[:8]}"', f'vault="{r.source}"',
+                      f'cos="{r.cos:.2f}"']
+            if args.scores:
+                rattrs.append(f'score="{r.score:.3f}"')
+            rattrs.append(f'gloss="{_gloss(r)}"')
+            print(f"  <related {' '.join(rattrs)}/>")
         print("</hit>")
+
+
+def _gloss(r) -> str:
+    """The one-line handle on a relation: its topic verbatim (a doc's heading
+    slug IS the gloss), else the opening words of the memory."""
+    if r.topic:
+        path, sep, slug = r.topic.rpartition("#")
+        return f"{path.rsplit('/', 1)[-1]}#{slug}" if sep else r.topic
+    words = r.text.split()
+    return " ".join(words[:15]) + ("…" if len(words) > 15 else "")
 
 
 def cmd_show(args) -> None:
@@ -438,6 +463,10 @@ def main() -> None:
     p.add_argument("--slot", action="append", help="name=value to bind into the query address")
     p.add_argument("--from", dest="from_vault", metavar="VAULT",
                    help="ask one named vault only (e.g. --from alice)")
+    p.add_argument("--except", dest="except_vaults", action="append",
+                   metavar="VAULT", default=[],
+                   help="leave a named vault out of this ask (repeatable); "
+                        "not with --from")
     p.add_argument("--local", action="store_true", help="skip vaults entirely")
     p.add_argument("--scores", action="store_true",
                    help="show raw support and per-hit cosines (diagnostics)")

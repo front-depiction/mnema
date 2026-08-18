@@ -109,6 +109,10 @@ def test_topic_collision_warns_on_unrelated_overwrite(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "UNRELATED content" in out          # sibling-erasure detected
     assert "sibling topics" in out
+    prior = Entry(text="lint with tsgo using the fast preset", topic="linting",
+                  at="2026-01-01T00:00:00Z")
+    assert f'<erased h="{prior.h[:8]}" at="2026-01-01" topic="linting">' in out
+    assert "\n  lint with tsgo using the fast preset\n</erased>" in out  # full text
 
 
 def test_forgotten_displacement_target_cannot_depress_live_currency(tmp_path):

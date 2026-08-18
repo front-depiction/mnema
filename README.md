@@ -10,11 +10,17 @@ structurally absent from the state, by arithmetic.
 $ mnema init
 $ mnema remember "the deploy freeze is on: no production deploys on fridays"
 $ mnema remember "deploy freeze lifted — continuous deploys all week, canary-gated"
-  displaced 8397fcd1  [attenuated 0.83]  "the deploy freeze is on: no production deploys..."
+remembered (2026-08-13T09:12:04.118Z)
+
+<displaced h="8397fcd1" at="2026-08-13" attenuated="0.83" reading="strong overlap — likely a replacement, verify">
+  the deploy freeze is on: no production deploys on fridays
+</displaced>
+
+read each displaced memory: does the new one actually REPLACE it? if not, restore it: mnema keep <hash>
 
 $ mnema ask "can we deploy on friday?"
 settled — a strong match exists; the top result is trustworthy
-navigate: mnema show <hash> opens any memory in full · mnema ask --from <vault> "..." scopes a vault · refine the question to keep moving
+navigate: <related/> lines are your answer's connections across every vault — mnema show <hash> opens any memory in full · …
 
 <hit h="2d2c364f" at="2026-08-13" kind="note" topic="ops/deploy-freeze">
   deploy freeze lifted — continuous deploys all week, canary-gated
@@ -58,8 +64,9 @@ The loop that makes it work as long-term memory:
 
 1. **Remember freely.** Prose in, nothing else. The system infers what each new
    memory displaces (floor-gated similarity, weight capped below 1) and prints
-   what it did — the agent sees `displaced 8397fcd1 [0.83] "..."` and can
-   immediately `keep 8397fcd1` if the inference was wrong. Hashes are pronouns
+   what it did — the agent sees a `<displaced h="8397fcd1" attenuated="0.83"
+   reading="…">` block holding the old belief's full text and can immediately
+   `keep 8397fcd1` if the inference was wrong. Hashes are pronouns
    the system hands you, never names you must invent — and every printed one
    dereferences to its full memory with `mnema show <hash>`.
 2. **Trust the verdict.** `ask` returns `settled` / `sparse` / `unwritten`
@@ -170,14 +177,15 @@ $ mnema remember "..."                              # ALWAYS local — writes
                                                     # cannot reach a vault
 ```
 
-When a question spans stores, the top hit also takes one relate hop —
-`<related h="8397fcd1" vault="alice" cos="0.75">` blocks inside the first
-hit surface beliefs that connect across vaults (see **The system browses
-for you**, below). The `cos` is a relatedness weight, not a support score —
-claim-to-claim cosines run hot, and these blocks never carry verdict
-semantics. Follow one with `mnema show <hash>` (the full memory, whichever
-vault it lives in) or `mnema ask --from <vault>` when the connection
-matters.
+When a question spans stores, each of the top three hits also takes one
+relate hop — `<related h="8397fcd1" vault="alice" cos="0.75" gloss="…"/>`
+lines nested inside the hit surface beliefs in *other* vaults that connect
+to it (see **The system browses for you**, below). One line each, no body:
+the `gloss` is the belief's topic or opening words, the `cos` a relatedness
+weight — not a support score; claim-to-claim cosines run hot and these lines
+never carry verdict semantics. Follow one with `mnema show <hash>` (the full
+memory, whichever vault it lives in) or `mnema ask --from <vault>`; drop a
+vault whose register doesn't fit the question with `--except <vault>`.
 
 Serving your store is one command, because its files are append-only and its
 config immutable:
@@ -213,14 +221,14 @@ one-belief-per-entry — already *are* queries like that. So every ask
 exploits it automatically, in two hops:
 
 ```
-your question ──▶ most relevant answer across ALL vaults    (ranked over the union)
+your question ──▶ most relevant answers across ALL vaults   (ranked over the union)
                         │
                         ▼
-              the answer itself — a detailed, assumption-laden
-              claim — becomes the query against every OTHER vault
+              each of the top three answers — a detailed, assumption-
+              laden claim — becomes the query against every OTHER vault
                         │
                         ▼
-              <related> beliefs arrive attached to your answer
+              <related …/> lines arrive attached to each answer
 ```
 
 You are still served the most relevant answer to your question — it just
@@ -235,7 +243,19 @@ Doing the best thing costs nothing: no linking step, no relation schema, no
 "see also" fields to maintain. Mounting a vault is the entire setup; the
 rest falls out of geometry, and it *improves* with the same discipline that
 improves everything else — a well-written memory is already an ideal probe.
-Bounds stay bounds: one hop deep, similarity only, never a verdict.
+
+Two details keep it sharp. The hop anchors on the top *three* hits, not
+one — top-3 is the reliable unit, so when the first hit is a resolution
+miss the runner-ups' relations still carry — and relations already shown
+under an earlier hit are not repeated, so the browse sizes itself (at most
+six per hit, two per vault, twelve per ask). And the ranking inside the hop
+is hub-penalized: candidates are admitted on raw cosine, then ranked with
+the union mean direction removed and each docked by its self-hubness (how
+close it sits to its own store's nearest rows), so summary sections and
+omnibus notes that relate to everything stop crowding out the sharp
+connection (measured: summary-type hubs among related lines 6% → 4%, at no
+cost in raw cosine). Bounds stay bounds: one hop deep, similarity only,
+never a verdict.
 
 ## Performance
 

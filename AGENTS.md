@@ -14,9 +14,12 @@ mnema keep <hash>
 ```
 
 - **remember**: prose in, nothing else. The output tells you what your write
-  displaced (`displaced 8397fcd1 [attenuated 0.83] "..."`). Read it. If an
-  inference is wrong — the displaced belief is NOT actually replaced by what
-  you wrote — restore it immediately with `mnema keep 8397fcd1`. Hashes are
+  displaced, in full — one `<displaced h="8397fcd1" attenuated="0.83"
+  reading="…">` block per attenuated belief, its whole text inside, and a
+  reading of the weight in words (near-restatement / strong overlap /
+  borderline). Read each one against what you just wrote. If an inference is
+  wrong — the displaced belief is NOT actually replaced by what you wrote —
+  restore it immediately with `mnema keep 8397fcd1`. Hashes are
   pronouns the system prints for you; never invent one, and any printed hash
   is recallable in full with `mnema show <hash>`.
 - **ask**: the verdict line comes first, in words: `settled` = the top
@@ -31,21 +34,22 @@ mnema keep <hash>
   ```
   <hit h="2d2c364f" at="2026-08-13" kind="note" topic="ops/deploy-freeze">
     deploy freeze lifted — continuous deploys all week, canary-gated
-    <related h="8397fcd1" vault="alice" cos="0.75" topic="ops/canary">
-      canary gates hold every deploy for one baking interval before...
-    </related>
+    <related h="8397fcd1" vault="alice" cos="0.75" gloss="ops/canary"/>
+    <related h="c41e02aa" vault="papers" cos="0.71" gloss="rollouts.pdf#3-2-canaries"/>
   </hit>
   ```
 
   The format contract: output is XML-shaped for readability, attributes are
   metadata, bodies are raw prose — read it, don't parse it.
   `superseded="<date>"`/`displaced="0.83"` attributes mean a newer belief
-  exists — prefer it. `<related>` blocks inside the top hit are relatedness,
-  not answers: they say a belief connects across vaults, their `cos` scale
-  runs hot (claim-to-claim cosines), and they never carry verdict semantics.
-  If a connection matters, follow it: `mnema show <hash>` reads the full
-  memory behind the block (any vault), or `mnema ask --from <vault>` re-asks
-  in that vault alone.
+  exists — prefer it. `<related …/>` lines inside the top three hits are
+  relatedness, not answers: each is a belief in ANOTHER vault that connects
+  to that hit — one line, no body, the `gloss` is its topic (or opening
+  words) and the `cos` is a relatedness weight on a hot claim-to-claim scale,
+  never a verdict. They are the browse: `mnema show <hash>` opens any of them
+  in full, `mnema ask --from <vault>` re-asks in that vault alone, and
+  `--except <vault>` drops a vault from an ask (both hops) when its register
+  doesn't fit the question.
 - **Answer from the hits, in your own words.** mnema never generates prose;
   you are the reader. Cite `at` timestamps when freshness matters.
 
@@ -197,11 +201,23 @@ before discarding them.
 
 Every mounted vault joins every ask automatically — mounting IS the linking
 step; there is no other. One ask ranks the union of all consulted stores and
-takes the true top hit wherever it lives; then that hit's own stored vector —
-not your question — probes every OTHER store, origin excluded. A single ask
-therefore shows two things: how your QUESTION resolves across everything, and
-how your ANSWER relates to everything else. The second is the browsing
-system.
+takes the true top hits wherever they live; then each of the top three hits'
+own stored vector — not your question — probes every OTHER store, origin
+excluded. A single ask therefore shows two things: how your QUESTION resolves
+across everything, and how your ANSWERS relate to everything else. The second
+is the browsing system. Three anchors, not one, because top-3 is the reliable
+unit: when the top hit is a resolution miss, the runner-ups' relations still
+carry — and relations already shown under an earlier hit are not repeated,
+so the browse sizes itself (up to six lines per hit, at most two from any
+one vault, twelve per ask).
+
+Ranking inside the hop is hub-penalized: candidates are admitted on raw
+cosine, then ranked with the union mean direction removed and each
+candidate docked by its self-hubness (how close it sits to its own store's
+nearest rows) — so summary sections and omnibus notes that relate to
+everything stop crowding out the sharp connection. Measured on 42 real
+questions: structural-summary hubs among related lines 6% → 4%, mean related
+length 177 → 146 words, at no cost in raw cosine.
 
 The hit is a stronger probe than the question. A stored memory is a
 distilled, specific claim, and claim-to-claim matching is the strongest
@@ -215,6 +231,13 @@ Colleagues' mounted vaults participate identically — your top hit surfaces
 what THEY hold nearest to it, with zero coordination. Bounds stay bounds:
 relate weights are similarity, the hop is one level deep, and verdicts never
 apply to relate lines.
+
+A plan ledger or campaign log is NOT a memory vault. Its entries are
+transcripts of work — lane reports, rulings-in-progress, status — not
+distilled beliefs; long and omnibus, they relate to everything and pollute
+the first hop too. Ingest such logs into their own store and ask them with
+`--from`; do not let them join every ask. `--except <vault>` is the escape
+hatch when one mounted vault's register doesn't fit the question.
 
 ## Working on this repo
 

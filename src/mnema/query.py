@@ -33,11 +33,20 @@ from .views import Views, postings_of
 SUPPORT_SETTLED = 0.65
 SUPPORT_UNWRITTEN = 0.55
 
-# Relate hop: the top hit's stored value vector probes every OTHER consulted
-# pool. Claim-to-claim cosines run hot (0.65–0.80 is ordinary), so these are
-# relatedness weights — never support-verdict material.
+# Relate hop: each of the top RELATE_HITS hits' stored value vectors probes
+# every OTHER consulted pool. Claim-to-claim cosines run hot (0.65–0.80 is
+# ordinary), so these are relatedness weights — never support-verdict material.
+# RELATE_FLOOR admits on RAW cosine (the scale users know); admitted rows are
+# RANKED hub-penalized — centered cosine (the union mean direction removed)
+# minus each row's self-hubness, the mean of its RELATE_HUB_K nearest centered
+# cosines within its own store — so summary chunks near everything in their
+# own document stop crowding out sharp connections.
 RELATE_FLOOR = 0.68
-RELATE_TOP = 3                       # rows surfaced per non-origin pool
+RELATE_HITS = 3                      # hits that take the hop, in rank order
+RELATE_PER_STORE = 2                 # rows per non-origin pool per hit
+RELATE_TOTAL = 6                     # rows across pools per hit
+RELATE_MAX = 12                      # rows per ask across all hits
+RELATE_HUB_K = 10
 
 VAULT_MATCH_KEYS = ("model", "dim", "seed", "sigma", "d_embed", "beta")
 
@@ -63,8 +72,9 @@ class Related:
     at: str
     kind: str
     h: str
-    cos: float                       # relatedness weight, not a support score
+    cos: float                       # raw cosine: relatedness weight, not support
     text: str
+    score: float = 0.0               # hub-penalized ranking score (diagnostics)
 
 
 @dataclass
@@ -72,8 +82,13 @@ class Answer:
     support: float
     verdict: str                     # "settled" | "sparse" | "unwritten"
     hits: list[Hit]
-    related: list[Related] = field(default_factory=list)
+    related_by_hit: list[list[Related]] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+
+    @property
+    def related(self) -> list[Related]:
+        """The top hit's relations (hits at rank RELATE_HITS+ carry none)."""
+        return self.related_by_hit[0] if self.related_by_hit else []
 
 
 @dataclass
@@ -87,6 +102,9 @@ class _Pool:
     superseded_by: dict[int, str]
     displaced: dict[str, float]
     views: Views | None = None       # the fold's read-side views, when current
+    ksum: np.ndarray | None = None   # the fold's key sum and count: the pool's
+    n: int = 0                       # share of the union mean direction
+    Vc: np.ndarray | None = None     # centered live rows, derived per ask on demand
 
 
 def _views_of(store: Store) -> Views | None:
@@ -128,7 +146,7 @@ def _pool_from_views(st: core.FoldState, q: np.ndarray, source: str,
             for i in g[:-1]:
                 superseded_by[i] = at
     return _Pool(source, entries, res, currency, V[:n], None, superseded_by,
-                 vw.displaced, views=vw)
+                 vw.displaced, views=vw, ksum=st.ksum, n=st.n)
 
 
 def _pool_doc_len(pool: _Pool) -> np.ndarray:
@@ -236,40 +254,122 @@ def _build_pool(store: Store, st: core.FoldState, q: np.ndarray,
     docs = [tokenize((e.topic or "") + " " + e.text) if mask[i] else []
             for i, e in enumerate(entries)]
     return _Pool(source, entries, res, currency, V[:n], docs, superseded_by,
-                 displaced)
+                 displaced, ksum=st.ksum, n=st.n)
 
 
-def _relate(pools: list[_Pool], origin: _Pool, row: int) -> list[Related]:
-    """The relate hop: the top hit's stored value row (unit vector, so a dot
-    IS the cosine) probes every OTHER consulted pool — origin excluded, so an
-    answer can never echo its own store. Up to RELATE_TOP live rows per pool
-    at or above RELATE_FLOOR, deduped by topic (keyless rows by hash)."""
+def _mean_direction(pools: list[_Pool]) -> np.ndarray | None:
+    """The union mean direction of everything folded into the consulted pools,
+    from each fold's key sum and count — no scan. None when nothing is folded."""
+    n = sum(p.n for p in pools)
+    if n == 0:
+        return None
+    mu = sum((p.ksum for p in pools if p.ksum is not None),
+             np.zeros_like(pools[0].V[0]))
+    norm = float(np.linalg.norm(mu))
+    return None if norm == 0.0 else (mu / norm).astype(np.float32)
+
+
+def _center(X: np.ndarray, mu: np.ndarray | None) -> np.ndarray:
+    """Remove the projection on the mean direction and renormalize rows."""
+    if mu is None:
+        return X
+    Y = X - np.outer(X @ mu, mu)
+    norm = np.linalg.norm(Y, axis=1, keepdims=True)
+    norm[norm == 0] = 1.0
+    return Y / norm
+
+
+def _centered_live(pool: _Pool, mu: np.ndarray | None) -> np.ndarray:
+    if pool.Vc is None:
+        pool.Vc = _center(pool.V[np.isfinite(pool.res)], mu)
+    return pool.Vc
+
+
+def _self_hubness(pool: _Pool, cand: np.ndarray, Yc: np.ndarray,
+                  mu: np.ndarray | None) -> np.ndarray:
+    """r(y) per candidate: the mean of its RELATE_HUB_K largest centered cosines
+    to the OTHER live rows of its own pool (all of them when fewer)."""
+    live_rows = np.flatnonzero(np.isfinite(pool.res))
+    Vc = _centered_live(pool, mu)
+    if len(live_rows) < 2:
+        return np.zeros(len(cand), np.float32)
+    C = Vc @ Yc.T                                        # (live, cand)
+    C[np.searchsorted(live_rows, cand), np.arange(len(cand))] = -np.inf
+    k = min(RELATE_HUB_K, len(live_rows) - 1)
+    top = np.partition(C, -k, axis=0)[-k:]
+    return top.mean(axis=0)
+
+
+def _relate_one(pools: list[_Pool], origin: _Pool, row: int,
+                mu: np.ndarray | None, exclude: set[str], seen: set[str],
+                budget: int) -> list[Related]:
+    """One hit's hop: its stored value row (unit, so a dot IS the cosine)
+    probes every OTHER pool — origin excluded, so an answer never echoes its
+    own store. Rows at or above RELATE_FLOOR (raw) are ranked by
+    2·cos_c − r(y); RELATE_PER_STORE per pool, RELATE_TOTAL across pools,
+    deduped by topic (keyless rows by hash) and against `seen`."""
     v = origin.V[row]
-    out: list[Related] = []
+    vc = _center(v[None, :], mu)[0]
+    picks: list[tuple[float, Related]] = []
     for pool in pools:
         if pool.source == origin.source:
             continue
-        cos = pool.V @ v
-        cos[~np.isfinite(pool.res)] = -np.inf
+        raw = pool.V @ v
+        raw[~np.isfinite(pool.res)] = -np.inf
+        cand = np.flatnonzero(raw >= RELATE_FLOOR)
+        cand = np.array([i for i in cand if pool.entries[int(i)].h not in exclude],
+                        dtype=np.int64)
+        if not len(cand):
+            continue
+        Yc = _center(pool.V[cand], mu)
+        score = 2.0 * (Yc @ vc) - _self_hubness(pool, cand, Yc, mu)
         taken: set[str] = set()
-        for i in np.argsort(-cos):
-            if cos[i] < RELATE_FLOOR or len(taken) == RELATE_TOP:
+        for j in np.argsort(-score, kind="stable"):
+            if len(taken) == RELATE_PER_STORE:
                 break
-            e = pool.entries[int(i)]
+            e = pool.entries[int(cand[j])]
             key = e.topic or e.h
-            if key in taken:
+            if key in taken or key in seen:
                 continue
             taken.add(key)
-            out.append(Related(pool.source, e.topic, e.at, e.kind, e.h,
-                               float(cos[i]), e.text))
+            picks.append((float(score[j]),
+                          Related(pool.source, e.topic, e.at, e.kind, e.h,
+                                  float(raw[cand[j]]), e.text, float(score[j]))))
+    picks.sort(key=lambda p: -p[0])
+    out = [r for _, r in picks[:min(RELATE_TOTAL, budget)]]
+    seen.update(r.topic or r.h for r in out)
+    return out
+
+
+def _relate(pools: list[_Pool], anchors: list[tuple[_Pool, int]]
+            ) -> list[list[Related]]:
+    """The relate hop for the top RELATE_HITS hits, in rank order: relations
+    already shown under an earlier hit are not repeated, no hit relates to
+    another shown hit, and RELATE_MAX bounds the whole ask."""
+    mu = _mean_direction(pools)
+    shown = {pool.entries[i].h for pool, i in anchors}
+    seen: set[str] = set()
+    out: list[list[Related]] = []
+    total = 0
+    for pool, i in anchors[:RELATE_HITS]:
+        rel = _relate_one(pools, pool, i, mu, shown, seen, RELATE_MAX - total)
+        total += len(rel)
+        out.append(rel)
     return out
 
 
 def ask(store: Store, question: str, top: int = 5, as_of: str | None = None,
         current_only: bool = False, slots: dict[str, str] | None = None,
-        embedder: Embedder | None = None, vaults: str = "all") -> Answer:
-    """vaults: "all" (local + every vault), "local", or a vault name."""
+        embedder: Embedder | None = None, vaults: str = "all",
+        exclude: tuple[str, ...] = ()) -> Answer:
+    """vaults: "all" (local + every vault), "local", or a vault name.
+    exclude: vault names left out of BOTH hops — no pool is built for them."""
     embedder = embedder or Embedder(store.cfg["model"])
+    if exclude:
+        known = {v["name"] for v in load_vaults(store.path)}
+        for name in exclude:
+            if name not in known:
+                raise SystemExit(f"no vault named '{name}' (see: mnema vault list)")
 
     q_emb = embedder.queries([question])
     value_lift, key_lift = store._lift_ops()
@@ -293,6 +393,8 @@ def ask(store: Store, question: str, top: int = 5, as_of: str | None = None,
         matched = False
         for vault in load_vaults(store.path):
             if wanted and vault["name"] != wanted:
+                continue
+            if vault["name"] in exclude:
                 continue
             matched = True
             try:
@@ -353,19 +455,17 @@ def ask(store: Store, question: str, top: int = 5, as_of: str | None = None,
                else "unwritten" if sup < SUPPORT_UNWRITTEN else "sparse")
 
     hits: list[Hit] = []
-    top_hit: tuple[_Pool, int] | None = None
+    anchors: list[tuple[_Pool, int]] = []
     for gi in np.argsort(-final)[:top]:
         if not np.isfinite(final[gi]):
             continue
         pi = int(np.searchsorted(offsets, gi, side="right") - 1)
         pool = pools[pi]
         i = int(gi - offsets[pi])
-        if top_hit is None:
-            top_hit = (pool, i)
+        anchors.append((pool, i))
         e = pool.entries[i]
         hits.append(Hit(float(res_all[gi]), i, e.at, e.kind, e.topic, e.text,
                         pool.superseded_by.get(i), h=e.h,
                         displaced=pool.displaced.get(e.h), source=pool.source))
-    related = (_relate(pools, *top_hit)
-               if top_hit is not None and len(pools) > 1 else [])
+    related = _relate(pools, anchors) if len(pools) > 1 else []
     return Answer(round(sup, 2), verdict, hits, related, warnings)

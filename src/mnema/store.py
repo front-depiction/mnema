@@ -386,11 +386,15 @@ class Store:
                 prior = entries[prior_i]
                 if cos < 0.55:
                     print(f"  ! topic '{entry.topic}' held UNRELATED content "
-                          f"(cos {cos:.2f}) — this write erases {prior.h[:8]} "
-                          f"\"{' '.join(prior.text.split())[:60]}\". If these should "
-                          f"coexist, use sibling topics ({entry.topic}/a, "
-                          f"{entry.topic}/b); undo with: mnema forget <this write>",
+                          f"(cos {cos:.2f}) — this write erases it entirely:",
                           flush=True)
+                    print(f'<erased h="{prior.h[:8]}" at="{prior.at[:10]}" '
+                          f'topic="{prior.topic}">', flush=True)
+                    print("  " + " ".join(prior.text.split()), flush=True)
+                    print("</erased>", flush=True)
+                    print(f"  if these should coexist, use sibling topics "
+                          f"({entry.topic}/a, {entry.topic}/b); undo this write "
+                          f"with: mnema forget <its hash>", flush=True)
                 else:
                     print(f"  supersedes {prior.h[:8]} at {entry.topic} "
                           f"(cos {cos:.2f})", flush=True)

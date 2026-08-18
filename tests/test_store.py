@@ -230,3 +230,24 @@ def test_forget_exactly_reverts_an_accidental_ingest(tmp_path):
     assert "acc0" not in s.latest_by_topic()
     # and the log still records everything: 1 + 3 + 3 retraction events
     assert len(s.entries()) == 7
+
+
+def test_cli_remember_renders_displaced_blocks_with_full_text_and_reading(
+        tmp_path, monkeypatch, capsys):
+    import argparse
+    from mnema import cli
+    s, emb, _ = _controlled(tmp_path, "render")
+    monkeypatch.setattr("mnema.store.Embedder", lambda model: emb)
+    s.remember_inferred(Entry(text="old policy", at="2026-01-01T00:00:00Z"), emb)
+    old_h = s.entries()[0].h
+
+    cli.cmd_remember(argparse.Namespace(
+        store=str(s.path), text="new policy", topic=None, slot=None, question=None))
+    out = capsys.readouterr().out
+    disp = next(w for x in s.entries() for th, w in x.displaces if th == old_h)
+    open_tag = next(l for l in out.splitlines() if l.startswith("<displaced "))
+    assert f'h="{old_h[:8]}"' in open_tag and 'at="2026-01-01"' in open_tag
+    assert f'attenuated="{disp:.2f}"' in open_tag
+    assert f'reading="{cli._attenuation_reading(disp)}"' in open_tag
+    assert "\n  old policy\n</displaced>" in out           # full text, then close
+    assert "mnema keep <hash>" in out
