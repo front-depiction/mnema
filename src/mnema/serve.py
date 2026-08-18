@@ -102,12 +102,15 @@ def running_daemons() -> list[tuple[Path, int]]:
 
 
 def serve(embedder, path: Path | None = None) -> None:
+    import signal
+    import sys
     path = path or socket_path(embedder.model_name)
-    _ = embedder.model                          # load weights before accepting
-    server = EmbedServer(path, embedder)
-    pid_path(path).write_text(str(os.getpid()))
-    print(f"mnema daemon: {embedder.model_name} warm on {path}", flush=True)
+    pid_path(path).write_text(str(os.getpid()))  # findable while still loading
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))   # so cleanup runs
     try:
+        _ = embedder.model                      # load weights before accepting
+        server = EmbedServer(path, embedder)
+        print(f"mnema daemon: {embedder.model_name} warm on {path}", flush=True)
         server.serve_forever()
     finally:
         path.unlink(missing_ok=True)
