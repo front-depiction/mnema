@@ -35,7 +35,8 @@ from typing import Callable, Protocol
 VAULTS = "vaults.json"
 CONFIG = "config.json"
 LOG = "log.jsonl"
-DERIVED = ["vec_v.f16", "vec_k.f16", "state.npz", "views.npz"]
+DERIVED = ["vec_v.f16", "vec_k.f16", "state.npz", "views.npz",
+           "pre_k.f16", "pre_v.f16", "log.off"]
 
 
 # ------------------------------------------------------------------ sources
@@ -54,6 +55,11 @@ class UrlSource:
         with urllib.request.urlopen(f"{self.base}/{filename}", timeout=15) as r:
             return r.read()
 
+    def size(self, filename: str) -> int:
+        req = urllib.request.Request(f"{self.base}/{filename}", method="HEAD")
+        with urllib.request.urlopen(req, timeout=15) as r:
+            return int(r.headers["Content-Length"])
+
 
 class DirSource:
     def __init__(self, path: str):
@@ -61,6 +67,9 @@ class DirSource:
 
     def fetch(self, filename: str) -> bytes:
         return (self.path / filename).read_bytes()
+
+    def size(self, filename: str) -> int:
+        return (self.path / filename).stat().st_size
 
 
 SOURCES: dict[str, Callable[[str], Source]] = {
@@ -132,8 +141,19 @@ def sync_vault(store_path: Path, vault: dict) -> Path:
     if not cfg.exists():
         cfg.write_bytes(src.fetch(CONFIG))      # immutable after init
 
+    # The log is append-only, so an unchanged SIZE means unchanged content —
+    # freshness costs one stat/HEAD, never a re-download of the whole log.
+    # No size support (custom adapters) falls back to the byte compare.
+    mirror_log = mirror / LOG
+    if mirror_log.exists() and (mirror / "state.npz").exists():
+        try:
+            if src.size(LOG) == mirror_log.stat().st_size:
+                return mirror
+        except Exception:
+            pass
+
     log = src.fetch(LOG)
-    cached = (mirror / LOG).read_bytes() if (mirror / LOG).exists() else None
+    cached = mirror_log.read_bytes() if mirror_log.exists() else None
     if log == cached and (mirror / "state.npz").exists():
         return mirror
 

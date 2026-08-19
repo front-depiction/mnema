@@ -50,6 +50,51 @@ RELATE_HUB_K = 10
 
 VAULT_MATCH_KEYS = ("model", "dim", "seed", "sigma", "d_embed", "beta")
 
+# Library-scale gates. Below PRE_MIN rows every code path is the exact one —
+# small stores keep today's behavior bit-for-bit. Above it, resolution runs
+# coarse-then-exact: the 256-dim sidecar (a seeded projection of the SAME
+# lifted rows, cosine-preserving) nominates PRE_CAND candidates, which are
+# rescored EXACTLY in full dimension — so scores shown are always true
+# cosines, and only the candidate cut is approximate.
+PRE_MIN = 100_000
+PRE_CAND = 5_000
+SCAN_BLOCK = 65_536
+RELATE_SLACK = 0.10                  # coarse margin under RELATE_FLOOR
+
+
+def _matvec(M, q: np.ndarray, block: int = SCAN_BLOCK) -> np.ndarray:
+    """M @ q for an fp16 memmap (or any array), blockwise: fp32 math, flat
+    memory, never materializes M."""
+    n = M.shape[0]
+    out = np.empty(n, np.float32)
+    for a in range(0, n, block):
+        out[a:a + block] = np.asarray(M[a:a + block], np.float32) @ q
+    return out
+
+
+def _rows32(M, idx) -> np.ndarray:
+    return np.asarray(M[np.asarray(idx)], np.float32)
+
+
+class _RowReader:
+    """entries[i] for a fully caught-up store without parsing the log: rows
+    are located by the byte-offset sidecar and parsed on first touch — an ask
+    reads the handful of rows it actually shows."""
+
+    def __init__(self, store: Store):
+        self.store = store
+        self._n = store.entry_count()
+        self._cache: dict[int, object] = {}
+
+    def __len__(self) -> int:
+        return self._n
+
+    def __getitem__(self, i: int):
+        e = self._cache.get(i)
+        if e is None:
+            e = self._cache[i] = self.store.read_rows([i])[0]
+        return e
+
 
 @dataclass
 class Hit:
@@ -97,7 +142,7 @@ class _Pool:
     entries: list
     res: np.ndarray                  # resolution cosines (masked -> -inf)
     currency: np.ndarray
-    V: np.ndarray                    # float32 value rows, one per entry
+    V: np.ndarray                    # fp16 value rows (memmap); gather, don't scan
     docs: list[list[str]] | None     # tokenized docs (re-derived pools only)
     superseded_by: dict[int, str]
     displaced: dict[str, float]
@@ -105,19 +150,21 @@ class _Pool:
     ksum: np.ndarray | None = None   # the fold's key sum and count: the pool's
     n: int = 0                       # share of the union mean direction
     Vc: np.ndarray | None = None     # centered live rows, derived per ask on demand
+    store: Store | None = None       # for the prefilter sidecar at scale
 
 
 def _views_of(store: Store) -> Views | None:
     return getattr(store, "views", None)
 
 
-def _currency_of(st: core.FoldState, K: np.ndarray, V: np.ndarray, n: int,
+def _currency_of(st: core.FoldState, K, V, n: int,
                  clusters: list[list[int]]) -> np.ndarray:
     currency = np.ones(n, np.float32)
     rows = sorted({j for cl in clusters for j in cl})
     if rows:
-        Kr = K[rows]
-        agree = np.clip(np.einsum("ij,ij->i", Kr @ st.S.T, V[rows]), 1e-6, None)
+        Kr = _rows32(K, rows)                # gather only the clustered rows
+        Vr = _rows32(V, rows)
+        agree = np.clip(np.einsum("ij,ij->i", Kr @ st.S.T, Vr), 1e-6, None)
         a_of = dict(zip(rows, agree))
         for cl in clusters:
             mx = max(a_of[j] for j in cl)
@@ -126,11 +173,54 @@ def _currency_of(st: core.FoldState, K: np.ndarray, V: np.ndarray, n: int,
     return currency
 
 
+def _lex_rows(vw: Views | None, q_terms: set[str] | None) -> np.ndarray | None:
+    """Rows posting any RARE query term — the lexical arm's jurisdiction.
+    These join the rescore candidates so a row that matters only lexically
+    (rare jargon in a dense-dissimilar chunk) still carries its true dense
+    cosine into rank fusion. Common terms are skipped: their BM25 weight is
+    negligible and their posting lists are the whole corpus."""
+    if vw is None or not q_terms:
+        return None
+    rows = []
+    for w in q_terms:
+        r, _ = postings_of(vw, w)
+        if 0 < len(r) <= 4 * PRE_CAND:
+            rows.append(r)
+    return np.concatenate(rows).astype(np.int64) if rows else None
+
+
+def _resolution(store: Store, K, V, n: int, q: np.ndarray,
+                extra: np.ndarray | None = None) -> np.ndarray:
+    """max(cos(q,key), cos(q,value)) per row. Exact full scan below PRE_MIN;
+    above it, the prefilter sidecar nominates PRE_CAND rows per arm — plus
+    the lexical rows in `extra` — and the candidates are rescored EXACTLY,
+    so every cosine shown or fused is a true one. Non-candidates read -inf:
+    dense ranks above the candidate horizon are preserved exactly."""
+    pre = store.prefilter(n) if n >= PRE_MIN else None
+    if pre is None:
+        return np.maximum(_matvec(K[:n], q), _matvec(V[:n], q))
+    preK, preV, P = pre
+    qp = q @ P
+    qn = float(np.linalg.norm(qp))
+    qp = (qp / qn).astype(np.float32) if qn else qp.astype(np.float32)
+    cands = []
+    for preM in (preK, preV):
+        coarse = _matvec(preM[:n], qp)
+        cands.append(np.argpartition(-coarse, min(PRE_CAND, n - 1))[:PRE_CAND])
+    if extra is not None and len(extra):
+        cands.append(extra)
+    cand = np.unique(np.concatenate(cands))
+    cand = cand[cand < n]
+    res = np.full(n, -np.inf, np.float32)
+    res[cand] = np.maximum(_rows32(K, cand) @ q, _rows32(V, cand) @ q)
+    return res
+
+
 def _pool_from_views(st: core.FoldState, q: np.ndarray, source: str,
-                     entries: list, V: np.ndarray, K: np.ndarray,
-                     vw: Views) -> _Pool:
+                     entries, V, K, vw: Views, store: Store,
+                     q_terms: set[str] | None = None) -> _Pool:
     n = vw.n
-    res = np.maximum(K[:n] @ q, V[:n] @ q)
+    res = _resolution(store, K, V, n, q, extra=_lex_rows(vw, q_terms))
     for ai, pi in vw.alias_parent:
         res[pi] = max(res[pi], res[ai])  # extra address for the same belief
     res[~vw.mask] = -np.inf
@@ -146,7 +236,7 @@ def _pool_from_views(st: core.FoldState, q: np.ndarray, source: str,
             for i in g[:-1]:
                 superseded_by[i] = at
     return _Pool(source, entries, res, currency, V[:n], None, superseded_by,
-                 vw.displaced, views=vw, ksum=st.ksum, n=st.n)
+                 vw.displaced, views=vw, ksum=st.ksum, n=st.n, store=store)
 
 
 def _pool_doc_len(pool: _Pool) -> np.ndarray:
@@ -177,11 +267,12 @@ def _pool_postings(pool: _Pool, q_terms: set[str]) -> dict:
 
 def _build_pool(store: Store, st: core.FoldState, q: np.ndarray,
                 as_of: str | None, current_only: bool, source: str,
-                entries: list | None = None) -> _Pool:
+                entries: list | None = None,
+                q_terms: set[str] | None = None) -> _Pool:
     all_entries = entries if entries is not None else store.entries()
-    V = store.vectors(VEC_V).astype(np.float32)
-    K = store.vectors(VEC_K).astype(np.float32)
-    n = min(len(all_entries), V.shape[0], K.shape[0])
+    V = store.vectors(VEC_V)                 # fp16 memmaps: rows are gathered
+    K = store.vectors(VEC_K)                 # or scanned blockwise, never
+    n = min(len(all_entries), V.shape[0], K.shape[0])   # materialized whole
     entries = all_entries[:n]
 
     # The persisted views ARE this derivation (the law: cached == recomputed);
@@ -191,7 +282,7 @@ def _build_pool(store: Store, st: core.FoldState, q: np.ndarray,
     vw = _views_of(store)
     if (vw is not None and as_of is None and not current_only
             and vw.n == n == len(all_entries)):
-        return _pool_from_views(st, q, source, entries, V, K, vw)
+        return _pool_from_views(st, q, source, entries, V, K, vw, store, q_terms)
 
     retracted = store.retracted_hashes(entries)
     mask = np.array([(e.at <= as_of if as_of else True)
@@ -206,7 +297,7 @@ def _build_pool(store: Store, st: core.FoldState, q: np.ndarray,
             if i not in current_idx:
                 mask[i] = False
 
-    res = np.maximum(K[:n] @ q, V[:n] @ q)
+    res = _resolution(store, K, V, n, q)
     row_of = {e.h: i for i, e in enumerate(entries)}
     for i, e in enumerate(entries):
         if e.kind == "alias" and e.target in row_of:
@@ -254,7 +345,7 @@ def _build_pool(store: Store, st: core.FoldState, q: np.ndarray,
     docs = [tokenize((e.topic or "") + " " + e.text) if mask[i] else []
             for i, e in enumerate(entries)]
     return _Pool(source, entries, res, currency, V[:n], docs, superseded_by,
-                 displaced, ksum=st.ksum, n=st.n)
+                 displaced, ksum=st.ksum, n=st.n, store=store)
 
 
 def _mean_direction(pools: list[_Pool]) -> np.ndarray | None:
@@ -264,7 +355,7 @@ def _mean_direction(pools: list[_Pool]) -> np.ndarray | None:
     if n == 0:
         return None
     mu = sum((p.ksum for p in pools if p.ksum is not None),
-             np.zeros_like(pools[0].V[0]))
+             np.zeros(pools[0].V.shape[1], np.float32))
     norm = float(np.linalg.norm(mu))
     return None if norm == 0.0 else (mu / norm).astype(np.float32)
 
@@ -281,8 +372,36 @@ def _center(X: np.ndarray, mu: np.ndarray | None) -> np.ndarray:
 
 def _centered_live(pool: _Pool, mu: np.ndarray | None) -> np.ndarray:
     if pool.Vc is None:
-        pool.Vc = _center(pool.V[np.isfinite(pool.res)], mu)
+        live = np.flatnonzero(np.isfinite(pool.res))
+        pool.Vc = _center(_rows32(pool.V, live), mu)
     return pool.Vc
+
+
+def _raw_relate(pool: _Pool, v: np.ndarray) -> np.ndarray:
+    """Raw cosines of one anchor value against a pool's rows. Exact scan below
+    PRE_MIN; above it the value-side prefilter nominates every row whose
+    coarse cosine clears RELATE_FLOOR - RELATE_SLACK, and those are rescored
+    exactly — the floor test below always sees true cosines."""
+    n = pool.V.shape[0]
+    pre = pool.store.prefilter(n) if (pool.store is not None
+                                      and n >= PRE_MIN) else None
+    if pre is None:
+        raw = _matvec(pool.V, v)
+    else:
+        _, preV, P = pre
+        vp = v @ P
+        norm = float(np.linalg.norm(vp))
+        vp = (vp / norm).astype(np.float32) if norm else vp.astype(np.float32)
+        coarse = _matvec(preV[:n], vp)
+        keep = np.flatnonzero(coarse >= RELATE_FLOOR - RELATE_SLACK)
+        if len(keep) > 4 * PRE_CAND:
+            keep = keep[np.argpartition(-coarse[keep], 4 * PRE_CAND)[:4 * PRE_CAND]]
+        raw = np.full(n, -np.inf, np.float32)
+        if len(keep):
+            keep = np.sort(keep)
+            raw[keep] = _rows32(pool.V, keep) @ v
+    raw[~np.isfinite(pool.res)] = -np.inf
+    return raw
 
 
 def _self_hubness(pool: _Pool, cand: np.ndarray, Yc: np.ndarray,
@@ -308,20 +427,19 @@ def _relate_one(pools: list[_Pool], origin: _Pool, row: int,
     own store. Rows at or above RELATE_FLOOR (raw) are ranked by
     2·cos_c − r(y); RELATE_PER_STORE per pool, RELATE_TOTAL across pools,
     deduped by topic (keyless rows by hash) and against `seen`."""
-    v = origin.V[row]
+    v = np.asarray(origin.V[row], np.float32)
     vc = _center(v[None, :], mu)[0]
     picks: list[tuple[float, Related]] = []
     for pool in pools:
         if pool.source == origin.source:
             continue
-        raw = pool.V @ v
-        raw[~np.isfinite(pool.res)] = -np.inf
+        raw = _raw_relate(pool, v)
         cand = np.flatnonzero(raw >= RELATE_FLOOR)
         cand = np.array([i for i in cand if pool.entries[int(i)].h not in exclude],
                         dtype=np.int64)
         if not len(cand):
             continue
-        Yc = _center(pool.V[cand], mu)
+        Yc = _center(_rows32(pool.V, cand), mu)
         score = 2.0 * (Yc @ vc) - _self_hubness(pool, cand, Yc, mu)
         taken: set[str] = set()
         for j in np.argsort(-score, kind="stable"):
@@ -358,6 +476,31 @@ def _relate(pools: list[_Pool], anchors: list[tuple[_Pool, int]]
     return out
 
 
+def _try_fast_pool(store: Store, q: np.ndarray, source: str,
+                   q_terms: set[str] | None = None) -> _Pool | None:
+    """Entries-free pool for a FULLY caught-up store: log line count, vector
+    rows, folded state, and views all agree, so catch_up would be a no-op and
+    no ask feature needs the parsed log. Any disagreement returns None and
+    the caller takes today's exact path — staleness is never served."""
+    try:
+        n_log = store.entry_count()
+    except OSError:
+        return None
+    n_vec = min(store._rows_on_disk(VEC_V), store._rows_on_disk(VEC_K))
+    if n_log == 0 or n_vec != n_log:
+        return None
+    st = store.load_state()
+    if st.n != n_vec:
+        return None
+    vw = store.load_views()
+    if vw.n != n_vec:
+        return None
+    store.views = vw
+    return _pool_from_views(st, q, source, _RowReader(store),
+                            store.vectors(VEC_V), store.vectors(VEC_K), vw,
+                            store, q_terms)
+
+
 def ask(store: Store, question: str, top: int = 5, as_of: str | None = None,
         current_only: bool = False, slots: dict[str, str] | None = None,
         embedder: Embedder | None = None, vaults: str = "all",
@@ -376,17 +519,24 @@ def ask(store: Store, question: str, top: int = 5, as_of: str | None = None,
     q = value_lift(q_emb)[0] if not store.cfg["sigma"] else key_lift(q_emb)[0]
     if slots:
         q = core.bind_slots(q, slots, store.cfg["seed"])
+    q_tokens = tokenize(question)
+    q_terms = set(q_tokens)
 
     pools: list[_Pool] = []
     warnings: list[str] = []
 
     if vaults in ("all", "local"):
-        entries = store.entries()
-        st = store.catch_up(embedder, quiet=True, entries=entries)
-        if as_of:
-            st = store.fold_prefix(as_of, entries=entries)
-        pools.append(_build_pool(store, st, q, as_of, current_only, "local",
-                                 entries=entries))
+        fast = (None if (as_of or current_only)
+                else _try_fast_pool(store, q, "local", q_terms))
+        if fast is not None:
+            pools.append(fast)
+        else:
+            entries = store.entries()
+            st = store.catch_up(embedder, quiet=True, entries=entries)
+            if as_of:
+                st = store.fold_prefix(as_of, entries=entries)
+            pools.append(_build_pool(store, st, q, as_of, current_only, "local",
+                                     entries=entries, q_terms=q_terms))
 
     if vaults != "local":
         wanted = None if vaults == "all" else vaults
@@ -408,12 +558,18 @@ def ask(store: Store, question: str, top: int = 5, as_of: str | None = None,
                 warnings.append(f"vault '{vault['name']}' skipped: "
                                 f"config differs on {mismatch}")
                 continue
+            fast = (None if (as_of or current_only)
+                    else _try_fast_pool(vs, q, vault["name"], q_terms))
+            if fast is not None:
+                pools.append(fast)
+                continue
             vault_entries = vs.entries()
             vst = vs.catch_up(quiet=True, embed_missing=False, entries=vault_entries)
             if as_of:
                 vst = vs.fold_prefix(as_of, entries=vault_entries)
             pools.append(_build_pool(vs, vst, q, as_of, current_only,
-                                     vault["name"], entries=vault_entries))
+                                     vault["name"], entries=vault_entries,
+                                     q_terms=q_terms))
         if wanted and not matched:
             raise SystemExit(f"no vault named '{wanted}' (see: mnema vault list)")
 
@@ -430,8 +586,6 @@ def ask(store: Store, question: str, top: int = 5, as_of: str | None = None,
     # re-derived docs) contribute the query terms' postings; df, N, and avgdl
     # merge across stores, so rarity is judged against everything visible —
     # the same statistics the corpus scan over concatenated docs produced.
-    q_tokens = tokenize(question)
-    q_terms = set(q_tokens)
     postings = {w: ([], []) for w in q_terms}
     for pool, off in zip(pools, offsets):
         for w, (rs, ts) in _pool_postings(pool, q_terms).items():

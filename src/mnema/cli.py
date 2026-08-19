@@ -7,6 +7,7 @@
     mnema show HASH [HASH ...]
     mnema stats
     mnema merge OTHER_STORE --out NEW_STORE
+    mnema recompile [--model NAME] [--out PATH]
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ from pathlib import Path
 
 from . import core
 from .embed import DEFAULT_MODEL, Embedder, MODELS
-from .store import Entry, Store, merge, past_horizon
+from .store import Entry, Store, merge, past_horizon, recompile
 from .translate import TRANSLATORS
 
 DEFAULT_STORE = Path(os.environ.get("MNEMA_STORE", Path.home() / ".mnema"))
@@ -468,6 +469,37 @@ def cmd_stats(args) -> None:
         print("WARNING: <20% capacity headroom — raise D or shard this store")
 
 
+def cmd_recompile(args) -> None:
+    """Re-derive vectors/state from the log — the migration path to a new
+    model. In place by default (the old store survives as a .pre-recompile
+    backup); --out builds elsewhere and leaves the source untouched."""
+    import shutil
+    import time as _time
+    src = Store(Path(args.store))
+    model = args.model or src.cfg["model"]
+    n = len(src.entries())
+    in_place = not args.out
+    out_path = Path(args.out) if args.out else Path(str(src.path.resolve()) + ".recompiling")
+    print(f"recompiling {n} entries: {src.cfg['model']} -> {model}", flush=True)
+    t0 = _time.perf_counter()
+    recompile(src, out_path, model)
+    dt = _time.perf_counter() - t0
+    if in_place:
+        backup = Path(str(src.path.resolve()) + ".pre-recompile")
+        if backup.exists():
+            shutil.rmtree(backup)
+        src.path.resolve().rename(backup)
+        out_path.rename(src.path.resolve())
+        print(f"recompiled in place; previous store kept at {backup}")
+    else:
+        print(f"recompiled into {out_path}; source untouched")
+    rate = n / dt if dt > 0 else 0.0
+    print(f"{n} entries in {dt:.1f}s ({rate:.1f}/s)")
+    if model != src.cfg["model"]:
+        print("note: vaults and peers must recompile onto the same model — "
+              "ask skips any vault whose config mismatches")
+
+
 def cmd_merge(args) -> None:
     a, b = Store(Path(args.store)), Store(Path(args.other))
     a_entries, b_entries = a.entries(), b.entries()
@@ -578,6 +610,13 @@ def main() -> None:
     p.add_argument("addr", nargs="?", help="add: URL or path; remove: vault name")
     p.add_argument("--name", help="vault name (default: derived from address)")
     p.set_defaults(fn=cmd_vault)
+
+    p = sub.add_parser("recompile", help="re-derive vectors/state from the log, "
+                       "optionally onto a new model (the log is the truth; "
+                       "everything else is a disposable cache)")
+    p.add_argument("--model", help="target embedding model (default: keep current)")
+    p.add_argument("--out", help="build into this path instead of swapping in place")
+    p.set_defaults(fn=cmd_recompile)
 
     p = sub.add_parser("stats", help="entries, capacity gauge, disk")
     p.set_defaults(fn=cmd_stats)

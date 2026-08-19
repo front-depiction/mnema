@@ -166,6 +166,31 @@ automatically and falls back gracefully if it dies. Update with `mnema
 update`: it pulls the source this CLI runs from and restarts the daemon
 (a running daemon pins the code it was started with).
 
+## Porting an existing store
+
+The log is the only truth; vectors, state, views, and sidecars are disposable
+caches. Because the log is append-only, porting is trivial by construction —
+there is no migration format, no export step, no version dance:
+
+```console
+mnema recompile                              # rebuild every derived file in place
+mnema recompile --model <NAME>               # move the store to a new embedding model
+mnema recompile --model <NAME> --out <PATH>  # build alongside; source untouched
+```
+
+- **In place is safe:** the previous store survives as a `.pre-recompile`
+  sibling until you delete it. Interrupted recompiles resume from the last
+  checkpoint — rerun the same command.
+- **To port a store to another machine, ship `log.jsonl`** (or the whole
+  directory to skip re-embedding). A store rebuilt from its log alone is the
+  same store — hashes, topics, supersessions, displacements all re-derive.
+- **Model migrations are ecosystem-wide:** `ask` skips any vault whose config
+  mismatches the local store, so publisher and consumers recompile onto the
+  same model — consumers then just re-sync, vaults carry vectors.
+- **Re-runs are near-free:** the embedding cache is content-addressed, so
+  recompiling a corpus the machine has embedded before costs seconds, not
+  hours.
+
 ## Which memory you're talking to
 
 Resolution order: `--store PATH` flag > `MNEMA_STORE` env var > `~/.mnema`.
