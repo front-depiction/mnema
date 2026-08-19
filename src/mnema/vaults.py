@@ -130,6 +130,27 @@ def remove_vault(store_path: Path, name: str) -> bool:
 
 # ------------------------------------------------------------------ syncing
 
+def refresh_vault(store_path: Path, vault: dict) -> Path | None:
+    """Config re-check for a mirror that failed the ask-time config match.
+    A store's config is immutable, but `recompile` mints a NEW store on the
+    same address with the same log bytes — the freshness probe sees nothing,
+    so only re-fetching the config can notice a publisher migration. If the
+    wire config differs from the cached one, wipe the mirror and re-sync
+    fresh; if it matches, the mismatch is real (publisher not migrated yet)
+    and None says so."""
+    import shutil
+    mirror = Path(store_path) / "vaults" / vault["name"]
+    try:
+        remote_cfg = source_for(vault["addr"]).fetch(CONFIG)
+    except Exception:
+        return None
+    cfg = mirror / CONFIG
+    if cfg.exists() and cfg.read_bytes() == remote_cfg:
+        return None
+    shutil.rmtree(mirror, ignore_errors=True)
+    return sync_vault(store_path, vault)
+
+
 def sync_vault(store_path: Path, vault: dict) -> Path:
     """Mirror a vault's files under <store>/vaults/<name>/. The log is the
     freshness check: byte-identical log => nothing else is fetched."""

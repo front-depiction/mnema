@@ -25,7 +25,7 @@ from . import core
 from .embed import Embedder
 from .lexical import bm25_index, gate_of, rrf, tokenize
 from .store import VEC_K, VEC_V, Store
-from .vaults import load_vaults, sync_vault
+from .vaults import load_vaults, refresh_vault, sync_vault
 from .views import Views, postings_of
 
 # Nearest-address support bands (dense-cosine scale; calibrated on real
@@ -554,6 +554,14 @@ def ask(store: Store, question: str, top: int = 5, as_of: str | None = None,
                 continue
             mismatch = [k for k in VAULT_MATCH_KEYS
                         if vs.cfg.get(k) != store.cfg.get(k)]
+            if mismatch:
+                # the publisher may have recompiled onto a new model: same
+                # address, same log bytes, NEW config — re-check the wire
+                refreshed = refresh_vault(store.path, vault)
+                if refreshed is not None:
+                    vs = Store(refreshed)
+                    mismatch = [k for k in VAULT_MATCH_KEYS
+                                if vs.cfg.get(k) != store.cfg.get(k)]
             if mismatch:
                 warnings.append(f"vault '{vault['name']}' skipped: "
                                 f"config differs on {mismatch}")

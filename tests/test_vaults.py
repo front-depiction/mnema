@@ -71,3 +71,45 @@ def test_vault_config_mismatch_is_skipped_with_warning(tmp_path):
     ans = ask(local, "y", embedder=FakeEmbedder(), vaults="all")
     assert any("odd" in w and "dim" in w for w in ans.warnings)
     assert all(h.source == "local" for h in ans.hits)
+
+
+def test_mirror_self_heals_after_publisher_model_migration(tmp_path):
+    """A recompile mints a new config on the same address, but the log bytes
+    don't change — a mirror that cached the old config must re-fetch and
+    re-sync when the ask-time match fails, not stay silently skipped."""
+    import shutil
+    from mnema.store import recompile
+
+    class Fake48(FakeEmbedder):
+        dim = 48
+
+    remote = _seed(tmp_path, "pubsrc", "the zk quorum is five nodes",
+                   "ops/zk", "2026-01-01T00:00:00Z")
+    local = _seed(tmp_path, "consumer", "standup is at 4pm", "standup",
+                  "2026-01-02T00:00:00Z")
+    add_vault(local.path, str(remote.path), name="pub")
+    ans = ask(local, "the zk quorum is five nodes",
+              embedder=FakeEmbedder(), vaults="all")
+    assert any(h.source == "pub" for h in ans.hits)             # mirror cached
+
+    # worst-case order: the CONSUMER migrates first...
+    out = recompile(local, tmp_path / "consumer.rc", model="fake2",
+                    embedder=Fake48())
+    shutil.rmtree(local.path)
+    out.path.rename(local.path)
+    migrated = Store(local.path)
+    # ...asks once (mirroring the publisher's still-OLD config: skipped)...
+    ans = ask(migrated, "the zk quorum is five nodes",
+              embedder=Fake48(), vaults="all")
+    assert any("skipped" in w for w in ans.warnings)
+    # ...and THEN the publisher migrates. The log bytes are identical, so
+    # sync's freshness probe sees nothing new — only a config re-check heals.
+    out = recompile(remote, tmp_path / "pubsrc.rc", model="fake2",
+                    embedder=Fake48())
+    shutil.rmtree(remote.path)
+    out.path.rename(remote.path)
+
+    ans = ask(migrated, "the zk quorum is five nodes",
+              embedder=Fake48(), vaults="all")
+    assert not any("skipped" in w for w in ans.warnings), ans.warnings
+    assert any(h.source == "pub" for h in ans.hits)             # healed, not skipped
