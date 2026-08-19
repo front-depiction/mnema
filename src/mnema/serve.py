@@ -35,22 +35,29 @@ def socket_path(model_name: str) -> Path:
 # ------------------------------------------------------------------ client
 
 def try_daemon(model_name: str, op: str, texts: list[str]) -> np.ndarray | None:
-    """One round trip to a running daemon, or None if there isn't one."""
+    """Round trips to a running daemon, or None if there isn't one. Requests
+    are chunked so a bulk ingest never materializes one giant JSON payload on
+    either side of the socket."""
+    from .embed import DAEMON_BATCH
     path = socket_path(model_name)
     if not path.exists():
         return None
+    parts: list[np.ndarray] = []
     try:
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
-            s.settimeout(CONNECT_TIMEOUT)
-            s.connect(str(path))
-            s.settimeout(REQUEST_TIMEOUT)
-            f = s.makefile("rwb")
-            f.write(json.dumps({"op": op, "texts": texts}).encode() + b"\n")
-            f.flush()
-            resp = json.loads(f.readline())
-        if "error" in resp:
-            return None
-        return np.asarray(resp["vectors"], dtype=np.float32)
+        for a in range(0, len(texts), DAEMON_BATCH):
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+                s.settimeout(CONNECT_TIMEOUT)
+                s.connect(str(path))
+                s.settimeout(REQUEST_TIMEOUT)
+                f = s.makefile("rwb")
+                f.write(json.dumps({"op": op,
+                                    "texts": texts[a:a + DAEMON_BATCH]}).encode() + b"\n")
+                f.flush()
+                resp = json.loads(f.readline())
+            if "error" in resp:
+                return None
+            parts.append(np.asarray(resp["vectors"], dtype=np.float32))
+        return np.concatenate(parts) if len(parts) != 1 else parts[0]
     except (OSError, ValueError):
         return None            # stale socket / dead daemon: fall back silently
 
